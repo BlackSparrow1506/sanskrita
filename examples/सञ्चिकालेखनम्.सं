@@ -1,0 +1,24 @@
+# सञ्चिकालेखनम् — writing and reading FILES from Sanskrit!
+# (python:pathlib via the bridge)
+
+आनय "python:pathlib" इति पथः।
+आनय "python:os" इति os।
+आनय "python:tempfile" इति अस्थायी।
+
+# लिख (write) — in the system's temp folder
+मानय स्थानम् = अस्थायी.gettempdir() + "/अभिलेखः.txt"।
+मानय सञ्चिका = पथः.Path(स्थानम्)।
+सञ्चिका.write_text("प्रथमा पङ्क्तिः — संस्कृतया लिखिता!\nद्वितीया पङ्क्तिः — जयतु संस्कृतम्!")।
+वद("लिखितम् ✓")।
+
+# पठ (read)
+मानय पाठः = सञ्चिका.read_text()।
+वद("पठितम्:")।
+वद(पाठः)।
+
+# अस्ति वा? (exists?)
+वद("सञ्चिका अस्ति?", सञ्चिका.exists())।
+
+# निष्कासय (clean up)
+os.remove(स्थानम्)।
+वद("निष्कासितम् ✓ —", सञ्चिका.exists())।

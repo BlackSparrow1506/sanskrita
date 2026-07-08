@@ -1,0 +1,12 @@
+# पञ्चाङ्गम् — calendar and system info via the python bridge
+
+आनय "python:calendar" इति पञ्चाङ्गम्।
+वद("जुलाई २०२६:")।
+वद(पञ्चाङ्गम्.month(२०२६, ७))।
+वद("किं २०२६ अधिवर्षम्?", पञ्चाङ्गम्.isleap(२०२६))।
+
+आनय "python:platform" इति यन्त्रम्।
+वद("यन्त्रस्य प्रणाली:", यन्त्रम्.system())।
+
+आनय "python:os" इति os।
+वद("वर्तमानः विस्तारः:", os.getcwd())।

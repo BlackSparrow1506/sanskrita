@@ -1,0 +1,15 @@
+# Roman mode — same language, typed without Devanagari.
+# '|' works as the danda; keywords use roman aliases.
+
+manay naam = "Gauri"|
+vada("namaste,", naam)|
+
+manay k = 10|
+yadi (k > 5) {
+    vada("mahat (big)")|
+} anyatha {
+    vada("laghu (small)")|
+}
+
+# mixing scripts is fine — it is ONE language:
+वद("जयतु संस्कृतम्")।

@@ -1,0 +1,51 @@
+{
+  "name": "sanskrita-lang",
+  "displayName": "संस्कृता (Sanskrita)",
+  "description": "The Sanskrit programming language — syntax highlighting, roman→Devanagari conversion, convert-on-save.",
+  "version": "0.1.0",
+  "publisher": "sanskrita",
+  "engines": { "vscode": "^1.60.0" },
+  "categories": ["Programming Languages"],
+  "main": "./extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "sanskrita",
+        "aliases": ["Sanskrita", "संस्कृता"],
+        "extensions": [".सं", ".sam"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "sanskrita",
+        "scopeName": "source.sanskrita",
+        "path": "./syntaxes/sanskrita.tmLanguage.json"
+      }
+    ],
+    "commands": [
+      {
+        "command": "sanskrita.convert",
+        "title": "संस्कृता: Convert roman → Devanagari (देवनागरीकुरु)"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "sanskrita.convert",
+        "key": "ctrl+shift+d",
+        "mac": "cmd+shift+d",
+        "when": "editorTextFocus && editorLangId == sanskrita"
+      }
+    ],
+    "configuration": {
+      "title": "Sanskrita",
+      "properties": {
+        "sanskrita.convertOnSave": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically convert roman aliases (vada, yadi, |, digits) to Devanagari every time you save a .सं/.sam file."
+        }
+      }
+    }
+  }
+}

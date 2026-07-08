@@ -1,0 +1,46 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Sanskrita",
+  "scopeName": "source.sanskrita",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#strings" },
+    { "include": "#keywords" },
+    { "include": "#builtins" },
+    { "include": "#constants" },
+    { "include": "#numbers" },
+    { "include": "#danda" }
+  ],
+  "repository": {
+    "comments": {
+      "match": "#.*$",
+      "name": "comment.line.number-sign.sanskrita"
+    },
+    "strings": {
+      "begin": "\"",
+      "end": "\"",
+      "name": "string.quoted.double.sanskrita",
+      "patterns": [{ "match": "\\\\.", "name": "constant.character.escape.sanskrita" }]
+    },
+    "keywords": {
+      "match": "(?<![\\w\\u0900-\\u097F])(मानय|ध्रुव|यदि|अथ|अन्यथा|यावत्|च|वा|न|विरम|अनुवर्त|विधि|फलम्|प्रत्येकम्|इति|वर्गः|सृज|अयम्|प्रयत|दोषे|आनय|कर्ता|कर्म|करण|सम्प्रदान|अपादान|अधिकरण|maanaya|manaya|manay|dhruva|dhruv|yadi|atha|anyathaa|anyatha|yaavat|yavat|cha|ca|vaa|na|virama|viram|anuvarta|anuvart|vidhi|phalam|pratyekam|iti|vargah|varga|srja|srija|ayam|prayata|prayat|doshe|aanaya|anaya|kartaa|karta|karma|karana|sampradaana|sampradana|apaadaana|apadana|adhikarana)(?![\\w\\u0900-\\u097F])",
+      "name": "keyword.control.sanskrita"
+    },
+    "builtins": {
+      "match": "(?<![\\w\\u0900-\\u097F])(वद|पृच्छ|वाक्यम्|सङ्ख्या|प्रकारः|दैर्घ्यम्|योजय|अपनय|कुञ्जिकाः|क्रमय|vada|vad|prccha|pruccha|puccha|vaakyam|vakyam|sankhyaa|sankhya|prakarah|prakara|dairghyam|dairghya|yojaya|apanaya|kunjikaah|kunjikah|kunjika|kramaya)(?![\\w\\u0900-\\u097F])",
+      "name": "support.function.builtin.sanskrita"
+    },
+    "constants": {
+      "match": "(?<![\\w\\u0900-\\u097F])(सत्यम्|असत्यम्|शून्यम्|satyam|asatyam|shuunyam|shunyam)(?![\\w\\u0900-\\u097F])",
+      "name": "constant.language.sanskrita"
+    },
+    "numbers": {
+      "match": "[0-9०-९]+(\\.[0-9०-९]+)?",
+      "name": "constant.numeric.sanskrita"
+    },
+    "danda": {
+      "match": "[।॥|]",
+      "name": "punctuation.terminator.statement.sanskrita"
+    }
+  }
+}
