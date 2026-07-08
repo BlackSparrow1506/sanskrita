@@ -18,7 +18,7 @@ sanskrita-playground             # browser playground (perfect Devanagari)
 
 Or without installing: `python3 sanskrita.py examples/नमस्ते.सं` (add `--roman` for ASCII digit output, `--convert file` to canonicalize a roman-mode file).
 
-**New to संस्कृता?** Read `docs/AI-SPEC.md` — or paste it into any AI assistant and it becomes your संस्कृता tutor. Design patterns guide: `docs/अभिकल्पनप्रतिमानानि.md`. License: MIT. Contributions: see `CONTRIBUTING.md`.
+**New to संस्कृता?** Start with `docs/TUTORIAL.md` — your first 10 programs in an hour. Read `docs/AI-SPEC.md` — or paste it into any AI assistant and it becomes your संस्कृता tutor. Design patterns guide: `docs/अभिकल्पनप्रतिमानानि.md`. License: MIT. Contributions: see `CONTRIBUTING.md`.
 
 ## Phase 1 features
 
