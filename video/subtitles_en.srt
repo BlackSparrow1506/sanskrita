@@ -1,0 +1,33 @@
+1
+00:00:00,300 --> 00:00:06,500
+Did you know? This programming language
+is written entirely in Sanskrit.
+
+2
+00:00:06,900 --> 00:00:12,600
+Its name is Sanskrita.
+Watch — 'vada' means: speak.
+
+3
+00:00:13,000 --> 00:00:17,400
+Variables, loops, functions —
+all built on Panini's grammar.
+
+4
+00:00:17,800 --> 00:00:23,000
+0.1 plus 0.2 —
+the answer: exactly 0.3.
+
+5
+00:00:23,200 --> 00:00:27,700
+Python gets this wrong!
+
+6
+00:00:28,100 --> 00:00:34,600
+And watch — it just recognized the meter of
+the Bhagavad Gita's first verse: Anushtubh!
+
+7
+00:00:35,000 --> 00:00:42,300
+Sanskrita. Open source. Link below.
+Jayatu Sanskritam!
