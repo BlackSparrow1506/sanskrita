@@ -1,0 +1,56 @@
+1
+00:00:00,300 --> 00:00:05,500
+The year 1985. NASA researcher Rick Briggs wrote —
+
+2
+00:00:05,600 --> 00:00:11,000
+Sanskrit is the world's most suitable language for computers.
+
+3
+00:00:11,400 --> 00:00:17,300
+And its foundation? About 2,500 years ago,
+Panini wrote 4,000 sutras
+
+4
+00:00:17,400 --> 00:00:23,400
+describing the entire grammar of the language —
+exactly like a program.
+
+5
+00:00:23,900 --> 00:00:31,200
+See the power of Sanskrit — every word is spoken
+exactly as it is written.
+
+6
+00:00:31,300 --> 00:00:38,500
+Every sentence, perfectly unambiguous.
+As if this language were made for computers.
+
+7
+00:00:39,000 --> 00:00:48,000
+So we thought — a language this perfect, could it not
+become a programming language itself? Why not!
+
+8
+00:00:48,500 --> 00:00:56,500
+That is why we built — Sanskrita!
+A real programming language, entirely in Sanskrit.
+
+9
+00:00:56,600 --> 00:01:05,300
+Vada. Yadi. Yaavat. Vidhi.
+And Panini's karakas too.
+
+10
+00:01:05,900 --> 00:01:17,100
+This is no translation — it has its own engine. Decimals always exact.
+Sandhi and meter — built into the language itself.
+
+11
+00:01:17,700 --> 00:01:29,100
+Our dream — Sanskrita standing proudly among the world's
+finest languages. Open source — for everyone, free forever.
+
+12
+00:01:29,600 --> 00:01:34,100
+And this is only the beginning. Jayatu Sanskritam!

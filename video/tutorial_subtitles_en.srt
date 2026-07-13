@@ -1,0 +1,49 @@
+1
+00:00:00,300 --> 00:00:07,300
+Your first program in Sanskrita — in just five minutes.
+Let's begin!
+
+2
+00:00:07,700 --> 00:00:15,900
+You need just two things — Python 3, already on most
+computers, and our GitHub repo.
+
+3
+00:00:16,300 --> 00:00:24,000
+Open the Terminal. First clone the repo,
+then type — bash install.sh.
+
+4
+00:00:24,100 --> 00:00:28,500
+That's it! Sanskrita is ready.
+
+5
+00:00:28,900 --> 00:00:36,000
+Now create a file — नमस्ते.सं.
+And write in it — वद("नमस्ते जगत्")।
+
+6
+00:00:36,100 --> 00:00:39,700
+Don't forget the danda । at the end!
+
+7
+00:00:40,100 --> 00:00:48,900
+Now run it — sanskrita नमस्ते.सं.
+And look — your first Sanskrit program just spoke!
+
+8
+00:00:49,300 --> 00:01:01,900
+Devanagari typing feels hard? No problem.
+Run sanskrita-playground — type in roman letters,
+and it becomes Devanagari automatically!
+
+9
+00:01:02,300 --> 00:01:15,800
+What next? The repo has a full tutorial — ten programs
+in an hour. Plus the AI-SPEC — turn any AI
+into your personal Sanskrita guru!
+
+10
+00:01:16,200 --> 00:01:24,300
+So write your first program today — post it on GitHub
+and tell us! Jayatu Sanskritam!
