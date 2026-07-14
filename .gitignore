@@ -2,3 +2,12 @@ __pycache__/
 *.pyc
 .DS_Store
 अभिलेखः.txt
+
+# local media & fonts (not versioned)
+*.ttf
+*.ttc
+video/*.mp4
+video/*.mp3
+video/*.aiff
+video/*.wav
+video/voice_used.txt
