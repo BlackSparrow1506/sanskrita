@@ -2,21 +2,39 @@
 
 The Sanskrit programming language. Website: enable GitHub Pages → `docs/`. CI runs `परीक्षा.py` on every push.
 
-## Install (one command)
+## Install
+
+**Prerequisite:** Python 3.9+ — check with `python3 --version`. Mac/Linux usually have it; on Mac, a popup may offer to install Apple's command line tools (click Install). Windows: get Python from [python.org](https://www.python.org/downloads/) (tick "Add to PATH" during setup).
+
+**macOS / Linux (2 commands):**
 
 ```bash
-bash install.sh
+git clone https://github.com/BlackSparrow1506/sanskrita
+cd sanskrita && bash install.sh
 ```
+
+(No git? Click the green **Code ▾** button on GitHub → **Download ZIP** → unzip → run `bash install.sh` inside the folder.)
 
 Then from anywhere:
 
 ```bash
-sanskrita examples/नमस्ते.सं     # run a program
+sanskrita examples/नमस्ते.सं     # run a program  →  नमस्ते जगत्
 sanskrita                        # interactive REPL
 sanskrita-playground             # browser playground (perfect Devanagari)
 ```
 
-Or without installing: `python3 sanskrita.py examples/नमस्ते.सं` (add `--roman` for ASCII digit output, `--convert file` to canonicalize a roman-mode file).
+If `sanskrita` isn't found, the installer printed a PATH line to add to `~/.zshrc` — paste it, open a new terminal.
+
+**Windows:** download/clone the repo, then run programs directly (no installer needed):
+
+```
+python sanskrita.py examples\नमस्ते.सं
+python playground.py
+```
+
+**Useful flags:** `--roman` (ASCII digit output) • `--convert file` (rewrite a roman-typed file into Devanagari).
+
+**Verify your install:** `python3 परीक्षा.py` should end with `सर्वं शुद्धम् ✓`.
 
 **New to संस्कृता?** Start with `docs/TUTORIAL.md` — your first 10 programs in an hour. Read `docs/AI-SPEC.md` — or paste it into any AI assistant and it becomes your संस्कृता tutor. Design patterns guide: `docs/अभिकल्पनप्रतिमानानि.md`. License: MIT. Contributions: see `CONTRIBUTING.md`.
 
