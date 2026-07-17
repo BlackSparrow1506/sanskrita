@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="sa">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ॐ संस्कृता — The Sanskrit Programming Language</title>
+<meta name="description" content="संस्कृता (Sanskrita) — a real, open-source programming language written entirely in Sanskrit. Devanagari keywords, Pāṇinian kāraka arguments, built-in sandhi & meter analysis.">
+<style>
+  :root { --bg:#1a1714; --panel:#100d0b; --accent:#f0a63a; --text:#f3ede4; --dim:#a59b8c; --green:#7ddc91; }
+  * { box-sizing:border-box; margin:0; }
+  body { background:var(--bg); color:var(--text); font-family:"Noto Sans Devanagari","Devanagari MT",system-ui,sans-serif; line-height:1.7; }
+  .wrap { max-width:960px; margin:0 auto; padding:0 24px; }
+  header { text-align:center; padding:90px 0 50px; }
+  h1 { font-size:4.2rem; color:var(--accent); }
+  .tag { font-size:1.4rem; color:var(--text); margin-top:8px; }
+  .sub { color:var(--dim); margin-top:10px; font-size:1.05rem; }
+  .btns { margin-top:34px; display:flex; gap:16px; justify-content:center; flex-wrap:wrap; }
+  .btn { padding:13px 30px; border-radius:10px; text-decoration:none; font-weight:700; font-size:1.05rem; }
+  .btn.primary { background:var(--accent); color:#1a1714; }
+  .btn.ghost { color:var(--accent); border:2px solid var(--accent); }
+  section { padding:44px 0; }
+  h2 { color:var(--accent); font-size:1.7rem; margin-bottom:20px; }
+  .code { background:var(--panel); border:1px solid #47403a; border-radius:14px; padding:22px 26px; font-size:1.15rem; overflow-x:auto; white-space:pre; }
+  .code .g { color:var(--green); }
+  .code .c { color:#7a7166; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(270px,1fr)); gap:18px; }
+  .card { background:var(--panel); border:1px solid #3a332d; border-radius:14px; padding:22px; }
+  .card h3 { color:var(--accent); font-size:1.15rem; margin-bottom:8px; }
+  .card p { color:var(--dim); font-size:.98rem; }
+  footer { text-align:center; padding:60px 0 40px; color:var(--dim); }
+  footer .om { color:var(--accent); font-size:1.4rem; }
+  a { color:var(--accent); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>ॐ संस्कृता</h1>
+  <div class="tag">The Sanskrit Programming Language</div>
+  <div class="sub">A real, open-source language — Devanagari keywords, Pāṇini's grammar, its own engine.<br>
+  २५०० वर्ष पुराना व्याकरण — आज के code में ज़िंदा।</div>
+  <div class="btns">
+    <a class="btn primary" href="https://github.com/BlackSparrow1506/sanskrita">GitHub ↗</a>
+    <a class="btn ghost" href="https://github.com/BlackSparrow1506/sanskrita/blob/main/docs/TUTORIAL.md">Tutorial — first 10 programs</a>
+  </div>
+</header>
+
+<section>
+  <h2>नमस्ते, जगत्</h2>
+  <div class="code"><span class="c"># your first program — नमस्ते.सं</span>
+वद("नमस्ते जगत्")।
+
+<span class="c"># variables, conditions, loops — in Sanskrit</span>
+मानय वयः = २५।
+यदि (वयः >= १८) { वद("प्रौढः")। }
+
+<span class="c"># functions with Pāṇini's kāraka roles — a world first</span>
+विधि प्रेषय(कर्म सन्देशः, सम्प्रदान प्राप्ता) { वद(सन्देशः, "→", प्राप्ता)। }
+प्रेषय(सम्प्रदान: "रामः", कर्म: "नमस्ते")।   <span class="c"># any order!</span>
+
+<span class="c"># and this: meter detection of the Bhagavad Gītā</span>
+आनय "संस्कृतम्" इति सं।
+वद(सं.छन्दः(श्लोकः))।   <span class="g">→ अनुष्टुभ् (अक्षराणि: ३२)</span></div>
+</section>
+
+<section>
+  <h2>Why संस्कृता?</h2>
+  <div class="grid">
+    <div class="card"><h3>Exact decimals</h3><p>०.१ + ०.२ = ०.३ — always. The arithmetic banks trust, as the default. Python and Java get this wrong.</p></div>
+    <div class="card"><h3>Pāṇini's kāraka arguments</h3><p>Declare each parameter's semantic role (कर्म, करण, सम्प्रदान…). Call in any order. No other language has this.</p></div>
+    <div class="card"><h3>Sanskrit linguistics built in</h3><p>Sandhi joining, meter detection, syllable analysis, Devanagari↔IAST transliteration — one import.</p></div>
+    <div class="card"><h3>Two ways to type</h3><p>Devanagari or roman (vada, yadi, manay…) — auto-converts. One language, zero typing barrier.</p></div>
+    <div class="card"><h3>Python bridge</h3><p>आनय "python:pandas" — 500,000+ libraries usable from day one, Kotlin-style.</p></div>
+    <div class="card"><h3>Bilingual, helpful errors</h3><p>Every error in Sanskrit + English, with line numbers and "did you mean…?" hints.</p></div>
+  </div>
+</section>
+
+<section>
+  <h2>Install in one minute</h2>
+  <div class="code">git clone https://github.com/BlackSparrow1506/sanskrita
+cd sanskrita && bash install.sh
+sanskrita examples/नमस्ते.सं      <span class="g">→ नमस्ते जगत्</span>
+sanskrita-playground             <span class="c"># browser playground</span></div>
+  <p style="margin-top:14px;color:var(--dim)">Needs only Python 3 (pre-installed on Mac/Linux). MIT licensed — free forever.
+  New here? Paste <a href="https://github.com/BlackSparrow1506/sanskrita/blob/main/docs/AI-SPEC.md">docs/AI-SPEC.md</a> into any AI assistant and it becomes your संस्कृता tutor.</p>
+</section>
+
+<footer>
+  <div class="om">ॐ</div>
+  <p>Made with love for students, scholars, and dreamers.<br>जयतु संस्कृतम् ।</p>
+</footer>
+
+</div>
+</body>
+</html>

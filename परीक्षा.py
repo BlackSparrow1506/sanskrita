@@ -24,8 +24,10 @@ for path in sorted(glob.glob(os.path.join(HERE, "examples", "*.सं"))
     src = open(path, encoding="utf-8").read()
     old_stdin, sys.stdin = sys.stdin, io.StringIO("गौरी\n२५\n")
     try:
+        interp = sanskrita.Interpreter()
+        interp.source_dir = os.path.dirname(path)
         with redirect_stdout(io.StringIO()):
-            sanskrita.run_source(src, sanskrita.Interpreter())
+            sanskrita.run_source(src, interp)
         print(f"  ✓ {name}")
     except Exception as err:
         print(f"  ✗ {name}: {err}")
