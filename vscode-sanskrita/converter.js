@@ -44,6 +44,12 @@ const ALIASES = {
   sankhyaa: "सङ्ख्या", sankhya: "सङ्ख्या",
   prakarah: "प्रकारः", prakara: "प्रकारः",
   dairghyam: "दैर्घ्यम्", dairghya: "दैर्घ्यम्",
+  paridhih: "परिधिः", paridhi: "परिधिः",
+  vibhaja: "विभज",
+  sanyojaya: "संयोजय",
+  khoja: "खोज",
+  pratisthapaya: "प्रतिस्थापय",
+  ansha: "अंश",
   yojaya: "योजय",
   apanaya: "अपनय",
   kunjikaah: "कुञ्जिकाः", kunjikah: "कुञ्जिकाः", kunjika: "कुञ्जिकाः",
@@ -53,6 +59,7 @@ const ALIASES = {
 const DEV_DIGITS = "०१२३४५६७८९";
 
 function devanagarify(src) {
+  src = src.normalize("NFC");
   let out = "";
   let i = 0;
   const n = src.length;

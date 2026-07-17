@@ -20,6 +20,7 @@ Phase 2 adds (per BLUEPRINT.md):
 
 import difflib
 import importlib
+import os
 import sys
 import unicodedata
 from decimal import Decimal
@@ -86,6 +87,13 @@ ALIASES = {
     "sankhyaa": "सङ्ख्या", "sankhya": "सङ्ख्या",
     "prakarah": "प्रकारः", "prakara": "प्रकारः",
     "dairghyam": "दैर्घ्यम्", "dairghya": "दैर्घ्यम्",
+    "paridhih": "परिधिः", "paridhi": "परिधिः",
+    # वाक्यकर्म (string) module functions
+    "vibhaja": "विभज",
+    "sanyojaya": "संयोजय",
+    "khoja": "खोज",
+    "pratisthapaya": "प्रतिस्थापय",
+    "ansha": "अंश",
     "yojaya": "योजय",
     "apanaya": "अपनय",
     "kunjikaah": "कुञ्जिकाः", "kunjikah": "कुञ्जिकाः", "kunjika": "कुञ्जिकाः",
@@ -99,7 +107,7 @@ KEYWORDS = {"मानय", "ध्रुव", "यदि", "अथ", "अन्
             "प्रयत", "दोषे", "आनय"}
 
 BUILTIN_NAMES = {"वद", "पृच्छ", "वाक्यम्", "सङ्ख्या", "प्रकारः", "दैर्घ्यम्",
-                 "योजय", "अपनय", "कुञ्जिकाः", "क्रमय"}
+                 "योजय", "अपनय", "कुञ्जिकाः", "क्रमय", "परिधिः"}
 
 TYPE_NAMES = {"पूर्णाङ्कः", "दशमांशः", "वाक्यम्", "सत्यासत्यम्", "सूची", "कोशः"}
 
@@ -111,6 +119,7 @@ def devanagarify(src: str) -> str:
     """Convert roman-mode source to canonical Devanagari form:
     keyword aliases -> केवल-देवनागरी keywords, ASCII digits -> ०-९, '|' -> '।'.
     Strings and comments are left untouched. Identifiers stay as typed."""
+    src = unicodedata.normalize("NFC", src)
     out = []
     i, n = 0, len(src)
     while i < n:
@@ -214,6 +223,8 @@ def type_name_of(v):
         return v.cls.name
     if isinstance(v, PyVal):
         return "python-वस्तु"
+    if isinstance(v, SModule):
+        return "कोष्ठकम्"
     return "अज्ञातः"
 
 
@@ -235,7 +246,8 @@ def type_matches(typename, v):
 # ----------------------------------------------------------------- lexer
 
 def lex(src: str):
-    toks = []
+    src = unicodedata.normalize("NFC", src)    # §10 #8: NFC mandatory —
+    toks = []                                  # visually identical text is identical
     i, n, line = 0, len(src), 1
     while i < n:
         c = src[i]
@@ -292,6 +304,13 @@ def lex(src: str):
                 else:
                     break
             word = src[i:j]
+            has_deva = any("ऀ" <= ch <= "ॿ" for ch in word)
+            has_latin = any(ch.isascii() and ch.isalpha() for ch in word)
+            if has_deva and has_latin:                 # §10 #7/#8: anti-spoofing
+                raise SanskritaError(line,
+                                     f"मिश्रलिपि-नाम '{word}' — एकस्यामेव लिप्यां लिखतु",
+                                     f"mixed-script name '{word}' — use one script only "
+                                     f"(Devanagari or roman, not both in one name)")
             word = ALIASES.get(word, word)             # roman alias -> canonical
             toks.append(("KW" if word in KEYWORDS else "ID", word, line))
             i = j; continue
@@ -738,6 +757,13 @@ class PyVal:
     def __init__(self, raw):
         self.raw = raw
 
+
+class SModule:
+    """A user's own .सं file, imported as a namespace (आनय "x.सं" इति नाम।)."""
+    def __init__(self, name, env):
+        self.name = name
+        self.env = env
+
 # ------------------------------------------------------ python bridge glue
 
 def to_py(v):
@@ -1041,11 +1067,24 @@ def _make_kalah():
     return ns
 
 
+def _make_vakyakarma():
+    """वाक्यकर्म — text operations, with Sanskrit names."""
+    import types
+    ns = types.SimpleNamespace()
+    setattr(ns, 'विभज', lambda t, sep: t.split(sep))            # split
+    setattr(ns, 'संयोजय', lambda lst, sep: sep.join(lst))       # join
+    setattr(ns, 'खोज', lambda t, sub: t.find(sub) + 1)          # find (1-based; ० = absent)
+    setattr(ns, 'प्रतिस्थापय', lambda t, a, b: t.replace(a, b))  # replace
+    setattr(ns, 'अंश', lambda t, i, j: t[i - 1:j])              # substring (1-based, incl.)
+    return ns
+
+
 NATIVE_MODULES = {
     'संस्कृतम्': _make_sanskritam, 'sanskritam': _make_sanskritam,
     'गणितम्': _make_ganitam, 'ganitam': _make_ganitam,
     'यादृच्छिकम्': _make_yadrcchikam, 'yadrcchikam': _make_yadrcchikam,
     'कालः': _make_kalah, 'kalah': _make_kalah,
+    'वाक्यकर्म': _make_vakyakarma, 'vakyakarma': _make_vakyakarma,
 }
 
 # ----------------------------------------------------------- interpreter
@@ -1057,7 +1096,10 @@ class Interpreter:
         for bname in BUILTIN_NAMES:        # so मानय सङ्ख्या = … may shadow them,
             base.vars[bname] = Builtin(bname, None)   # but सङ्ख्या = … (no मानय)
             base.consts.add(bname)                    # still hits the const guard
+        self.base = base
         self.globals = Env(parent=base)
+        self.source_dir = None             # folder of the running .सं file
+        self.modules = {}                  # cache: path -> SModule
 
     # ---- display
 
@@ -1189,6 +1231,30 @@ class Interpreter:
             modname = mod[7:] if mod.startswith("python:") else mod
             if modname in NATIVE_MODULES:              # native संस्कृता modules
                 env.vars[alias] = PyVal(NATIVE_MODULES[modname]())
+                return
+            if modname.endswith((".सं", ".sam")):      # the user's own .सं files!
+                base_dir = self.source_dir or os.getcwd()
+                path = os.path.abspath(os.path.join(base_dir, modname))
+                if path in self.modules:
+                    env.vars[alias] = self.modules[path]
+                    return
+                try:
+                    with open(path, encoding="utf-8") as f:
+                        msrc = f.read()
+                except OSError:
+                    raise SanskritaError(line,
+                                         f"सञ्चिका '{modname}' न प्राप्ता",
+                                         f"file '{modname}' not found (looked in {base_dir})")
+                menv = Env(parent=self.base)
+                module = SModule(alias, menv)
+                self.modules[path] = module
+                old_dir = self.source_dir
+                self.source_dir = os.path.dirname(path)
+                try:
+                    self.run(Parser(lex(msrc)).program(), menv)
+                finally:
+                    self.source_dir = old_dir
+                env.vars[alias] = module
                 return
             try:
                 pymod = importlib.import_module(modname)
@@ -1354,6 +1420,13 @@ class Interpreter:
                 raise SanskritaError(line,
                                      f"'{obj.cls.name}' वस्तुनि '{name}' नास्ति",
                                      f"'{obj.cls.name}' object has no '{name}'")
+            if isinstance(obj, SModule):
+                if name in obj.env.vars:
+                    return obj.env.vars[name]
+                sa_h, en_h = hint_for(name, obj.env.vars)
+                raise SanskritaError(line,
+                                     f"'{obj.name}' कोष्ठके '{name}' नास्ति{sa_h}",
+                                     f"module '{obj.name}' has no '{name}'{en_h}")
             if isinstance(obj, PyVal):
                 try:
                     return to_sk(getattr(obj.raw, name))
@@ -1480,11 +1553,23 @@ class Interpreter:
             vals[0].append(vals[1])
             return None
         if name == "अपनय":
+            if len(vals) == 2 and isinstance(vals[0], dict):
+                if vals[1] not in vals[0]:
+                    raise SanskritaError(line, f"कुञ्जिका '{vals[1]}' कोशे नास्ति",
+                                         f"key '{vals[1]}' not found in the कोशः")
+                return vals[0].pop(vals[1])
             if len(vals) != 2 or not isinstance(vals[0], list):
-                raise SanskritaError(line, "अपनय(सूची, स्थानाङ्कः) — द्वे अपेक्षिते",
-                                     "अपनय(list, index) — needs a list and an index")
+                raise SanskritaError(line, "अपनय(सूची, स्थानाङ्कः) / अपनय(कोशः, कुञ्जिका)",
+                                     "अपनय(list, index) or अपनय(map, key)")
             i = self.list_index(vals[0], vals[1], line)
             return vals[0].pop(i - 1)
+        if name == "परिधिः":
+            ok = (len(vals) == 2 and all(isinstance(v, int)
+                  and not isinstance(v, bool) for v in vals))
+            if not ok:
+                raise SanskritaError(line, "परिधिः(आदिः, अन्तः) — द्वौ पूर्णाङ्कौ अपेक्षितौ",
+                                     "परिधिः(start, end) — needs two whole numbers")
+            return list(range(vals[0], vals[1] + 1))   # inclusive, 1-based spirit
         if name == "कुञ्जिकाः":
             if len(vals) != 1 or not isinstance(vals[0], dict):
                 raise SanskritaError(line, "कुञ्जिकाः(कोशः) — कोशः अपेक्षितः",
@@ -1615,6 +1700,7 @@ def main(argv):
         else:
             print(f"पूर्वमेव देवनागरी ✓ {path}")
         return 0
+    interp.source_dir = os.path.dirname(os.path.abspath(path))
     try:
         run_source(src, interp)
     except SanskritaError as err:
