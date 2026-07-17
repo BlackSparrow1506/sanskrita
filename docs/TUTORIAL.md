@@ -61,7 +61,7 @@ Output: `०.१ + ०.२ = ०.३` — Python and Java answer 0.3000000000000
 }
 ```
 
-`यावत्` = "as long as". **Try:** print only even rows using `अनुवर्त` when `इ % २ == १`.
+`यावत्` = "as long as". Shortcut for counting: `प्रत्येकम् इ इति परिधिः(१, १०) { … }` — परिधिः(1,10) gives the numbers 1 to 10, both ends included. **Try:** print only even rows using `अनुवर्त` when `इ % २ == १`.
 
 ## ६ — क्रयसूची (Shopping list)
 
@@ -129,6 +129,23 @@ A `कोशः` ("treasury") stores key→value pairs. **Try:** compute the tot
 Output ends with: `अनुष्टुभ् (अक्षराणि: ३२)` — your program just recognized the **meter of the Bhagavad Gītā's first verse**. No other programming language on Earth can do this natively. **Try:** सं.संधय your own name with "अपि".
 
 ---
+
+## Bonus — grow beyond one file (v0.3+)
+
+When your programs grow, split them! Put helper विधिs in one file and import it:
+
+```
+# सहायः.सं
+विधि द्विगुणः(क) { फलम् क * २। }
+```
+
+```
+# मुख्यम्.सं
+आनय "सहायः.सं" इति सहायः।
+वद(सहायः.द्विगुणः(२१))।        # ४२
+```
+
+That's how real projects are built — libraries of your own, in Sanskrit. Text work? `आनय "वाक्यकर्म" इति वा।` gives split/join/find/replace.
 
 ## ११ — the eleventh program is publishing your ten
 

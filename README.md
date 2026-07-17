@@ -1,6 +1,6 @@
-# ॐ संस्कृता (Sanskrita) v0.2 — वृक्षः
+# ॐ संस्कृता (Sanskrita) v0.3 — फलम्
 
-The Sanskrit programming language. Phase 2 interpreter (per `../BLUEPRINT.md`).
+The Sanskrit programming language. Website: enable GitHub Pages → `docs/`. CI runs `परीक्षा.py` on every push.
 
 ## Install (one command)
 
@@ -44,6 +44,15 @@ Or without installing: `python3 sanskrita.py examples/नमस्ते.सं`
 - **प्रयत/दोषे** — try/catch error handling
 - **आनय Python-bridge** — `आनय "python:math" इति गणितम्।` — 5 lakh libraries
 - New builtins: योजय (append), अपनय (remove), कुञ्जिकाः (keys), क्रमय (sort)
+
+## New in v0.3 (फलम्)
+
+- **Import your own files:** `आनय "सहायः.सं" इति सहायः।` — build your own libraries in संस्कृता
+- **वाक्यकर्म** string module: विभज (split), संयोजय (join), खोज (find, 1-based), प्रतिस्थापय (replace), अंश (substring)
+- **परिधिः(१, १००)** — inclusive range for easy counting loops
+- **अपनय(कोशः, कुञ्जिका)** — remove a key from a map
+- **Safety:** NFC normalization mandatory; mixed-script identifiers (नामx) rejected
+- **Process:** CI on every push, `मापनम्.py` benchmarks (see BENCHMARKS.md), landing page in `docs/`
 
 ## The संस्कृतम् library — unique in the world
 

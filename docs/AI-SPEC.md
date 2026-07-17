@@ -1,6 +1,6 @@
 # संस्कृता (Sanskrita) — Complete Language Specification for AI Assistants
 
-> Paste this document into any AI (ChatGPT, Claude, Gemini…) and it can write, explain, and debug correct संस्कृता code. Version 0.2 "वृक्षः".
+> Paste this document into any AI (ChatGPT, Claude, Gemini…) and it can write, explain, and debug correct संस्कृता code. Version 0.3 "फलम्".
 
 ## What संस्कृता is
 
@@ -18,6 +18,8 @@ A real interpreted programming language with Sanskrit (Devanagari) keywords, run
 8. **Devanagari digits ०-९ and ASCII 0-9 both work.** Output defaults to Devanagari.
 9. **Reserved words cannot be identifiers**: notably न (not), फलम् (return), इति, च, वा, सृज, अयम्.
 10. Every keyword has a roman alias (see table); both scripts are ONE language.
+11. **One script per identifier**: `नामx` (Devanagari + Latin mixed) is a lex error. Digits and `_` are neutral.
+12. Source is NFC-normalized automatically — visually identical Devanagari is identical.
 
 ## Keywords
 
@@ -45,7 +47,7 @@ A real interpreted programming language with Sanskrit (Devanagari) keywords, run
 
 ## Builtins
 
-वद(…) print • पृच्छ(prompt) input • वाक्यम्(x) to-string • सङ्ख्या(s) to-number • प्रकारः(x) type-of • दैर्घ्यम्(x) length • योजय(list, v) append • अपनय(list, i) remove-at • कुञ्जिकाः(map) keys • क्रमय(list) sorted copy.
+वद(…) print • पृच्छ(prompt) input • वाक्यम्(x) to-string • सङ्ख्या(s) to-number • प्रकारः(x) type-of • दैर्घ्यम्(x) length • योजय(list, v) append • अपनय(list, i) remove-at / अपनय(map, key) remove-key • कुञ्जिकाः(map) keys • क्रमय(list) sorted copy • परिधिः(a, b) inclusive integer range as a list — `प्रत्येकम् इ इति परिधिः(१, १०) { … }` is the counting loop.
 
 ## Syntax examples (canonical)
 
@@ -88,7 +90,18 @@ A real interpreted programming language with Sanskrit (Devanagari) keywords, run
 आनय "गणितम्" इति ग।        # math: ग.वर्गमूलम् ग.घातः ग.ज्या ग.कोज्या ग.पाई ग.तलम् ग.उपरितलम्
 आनय "यादृच्छिकम्" इति य।   # random: य.अन्तरे(a,b) य.वरय(सूची) य.भिन्नम्()
 आनय "कालः" इति का।         # time: का.अद्य() का.संप्रति() का.वर्षः()
+आनय "वाक्यकर्म" इति वा।    # strings: वा.विभज(t,sep) वा.संयोजय(list,sep) वा.खोज(t,sub)→1-based(०=absent)
+                            #          वा.प्रतिस्थापय(t,old,new) वा.अंश(t,i,j) substring 1-based inclusive
 ```
+
+**The user's own .सं files (v0.3+):**
+
+```
+आनय "सहायः.सं" इति सहायः।   # runs the file once, exposes its top-level
+वद(सहायः.द्विगुणः(२१))।      # विधिs/variables as सहायः.name
+```
+
+Paths resolve relative to the importing file; modules are cached (imported once).
 
 **Python bridge (any installed Python module):**
 
