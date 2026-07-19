@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sanskrita"
+version = "0.3.1"
+description = "संस्कृता — the Sanskrit programming language. Devanagari keywords, Pāṇinian kāraka arguments, built-in sandhi & meter analysis."
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "Gauri Langote" }]
+requires-python = ">=3.9"
+keywords = ["sanskrit", "programming-language", "interpreter", "devanagari", "panini"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Topic :: Software Development :: Interpreters",
+    "Natural Language :: Sanskrit",
+    "Intended Audience :: Education",
+]
+
+[project.urls]
+Homepage = "https://github.com/BlackSparrow1506/sanskrita"
+Repository = "https://github.com/BlackSparrow1506/sanskrita"
+
+[project.scripts]
+sanskrita = "sanskrita:console"
+sanskrita-playground = "playground:main"
+
+[tool.setuptools]
+py-modules = ["sanskrita", "playground"]
