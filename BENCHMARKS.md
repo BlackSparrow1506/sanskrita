@@ -1,12 +1,23 @@
 # मितव्यय Benchmarks (§7c rule: honest numbers, every release)
 
-Engine: sanskrita.py v0.3 (Python tree-walking interpreter) — measured 2026-07-18
+Engine: sanskrita.py v0.3 (Python tree-walking interpreter) — measured 2026-07-19
 
 | Workload | संस्कृता time | Python time | ratio | संस्कृता peak KB | Python peak KB |
 |---|---|---|---|---|---|
-| loop sum 1..50,000 | 314.3 ms | 8.3 ms | 38× | 36 | 14 |
-| fibonacci(18) recursive | 188.5 ms | 0.5 ms | 402× | 118 | 24 |
-| string build ×2,000 | 10.9 ms | 0.4 ms | 29× | 14 | 14 |
+| loop sum 1..50,000 | 285.4 ms | 7.9 ms | 36× | 36 | 14 |
+| fibonacci(18) recursive | 186.4 ms | 0.4 ms | 424× | 118 | 24 |
+| string build ×2,000 | 10.3 ms | 0.4 ms | 27× | 14 | 14 |
+
+## द्रुत (experimental compiled subset — द्रुतम्.py via gcc -O2)
+
+| Workload | compiled run | vs interpreter |
+|---|---|---|
+| loop sum 1..50,000 | 0.20 ms | 1420× faster |
+| fibonacci(18) recursive | 0.18 ms | 1041× faster |
+
+Compiled-run times are dominated by ~0.15 ms process startup — the
+computation itself is smaller still. Subset only (ints, loops, functions);
+this is the §7b यन्त्रसङ्कलकः mode proven early, not a release feature.
 
 **Honest reading:** the current engine is a tree-walking interpreter written in
 Python, so it pays Python's cost *plus* interpretation overhead — the ratio
