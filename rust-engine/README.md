@@ -1,0 +1,41 @@
+# वेगः — the संस्कृता native Rust engine
+
+The Phase 3c rewrite: a compiled, standalone engine for संस्कृता that needs no
+Python. The Python interpreter (`../sanskrita.py`) stays as the **reference
+implementation**; this engine is correct when it produces identical results and
+passes the conformance suite (`../परीक्षा.py`, 51 cases).
+
+## Status: **slice 1 — lexer** (in progress, incremental)
+
+Built incrementally so every step is compilable and testable:
+
+- [x] **Slice 1 — lexer**: tokens, Devanagari + ASCII digits, danda, strings,
+  comments, roman aliases, keyword/identifier split, mixed-script guard.
+- [ ] Slice 2 — parser (AST for the core subset)
+- [ ] Slice 3 — evaluator (variables, arithmetic, वद, यदि, यावत्)
+- [ ] Slice 4 — functions, फलम्, recursion
+- [ ] Slice 5 — exact decimals (the correctness promise), strings-as-values
+- [ ] Slice 6 — lists, maps, classes, प्रयत/दोषे
+- [ ] Slice 7 — kāraka arguments, संस्कृतम् stdlib, conformance parity
+
+## Build & test
+
+Requires Rust (install from https://rustup.rs):
+
+```bash
+cargo build --release      # produces target/release/sanskrita-veg
+cargo test                 # runs the lexer unit tests
+cargo run -- ../examples/नमस्ते.सं   # slice 1: prints the token stream
+```
+
+## Design
+
+Mirrors `sanskrita.py` deliberately — same token kinds, same keyword set, same
+error style (bilingual). Translating a well-tested Python reference into Rust
+one slice at a time is far safer than a clean-room rewrite, and the conformance
+suite catches any drift.
+
+Target: single binary, ~30–50× faster than the Python interpreter, no runtime
+dependency. See `../BENCHMARKS.md` for the numbers this must beat.
+
+जयतु संस्कृतम् ।

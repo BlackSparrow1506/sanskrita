@@ -1,0 +1,15 @@
+[package]
+name = "sanskrita"
+version = "0.1.0"
+edition = "2021"
+description = "संस्कृता — the Sanskrit programming language, native Rust engine (वेगः)"
+license = "MIT"
+authors = ["Gauri Langote"]
+
+[[bin]]
+name = "sanskrita-veg"
+path = "src/main.rs"
+
+[profile.release]
+opt-level = 3
+lto = true
