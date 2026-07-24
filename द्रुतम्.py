@@ -17,6 +17,7 @@ Usage:  python3 द्रुतम्.py program.सं            # transpile +
         python3 द्रुतम्.py program.सं --keep-c   # also keep the generated .c
 """
 
+import hashlib
 import os
 import subprocess
 import sys
@@ -210,22 +211,28 @@ def main():
     if cc is None:
         print("No C compiler found (tcc/gcc/cc)", file=sys.stderr)
         return 3
-    with tempfile.TemporaryDirectory() as td:
-        cfile = os.path.join(td, "out.c")
-        binfile = os.path.join(td, "out.bin")
-        with open(cfile, "w", encoding="utf-8") as f:
+    if keep:
+        with open(path + ".c", "w", encoding="utf-8") as f:
             f.write(c_code)
-        if keep:
-            with open(path + ".c", "w", encoding="utf-8") as f:
+        print(f"(C saved: {path}.c)", file=sys.stderr)
+    # cache compiled binary by content hash — instant re-run when unchanged
+    cache_dir = os.path.join(tempfile.gettempdir(), "sanskrita-druta-cache")
+    os.makedirs(cache_dir, exist_ok=True)
+    tag = hashlib.sha256((cc + "\n" + c_code).encode("utf-8")).hexdigest()[:16]
+    binfile = os.path.join(cache_dir, tag)
+    if not os.path.exists(binfile):
+        with tempfile.TemporaryDirectory() as td:
+            cfile = os.path.join(td, "out.c")
+            with open(cfile, "w", encoding="utf-8") as f:
                 f.write(c_code)
-            print(f"(C saved: {path}.c)", file=sys.stderr)
-        flags = ["-O2"] if cc != "tcc" else []
-        r = subprocess.run([cc, *flags, cfile, "-o", binfile], capture_output=True)
-        if r.returncode != 0:
-            print(r.stderr.decode(), file=sys.stderr)
-            return 4
-        return subprocess.run([binfile]).returncode
-    return 0
+            flags = ["-O2"] if cc != "tcc" else []
+            tmpbin = binfile + ".tmp"
+            r = subprocess.run([cc, *flags, cfile, "-o", tmpbin], capture_output=True)
+            if r.returncode != 0:
+                print(r.stderr.decode(), file=sys.stderr)
+                return 4
+            os.replace(tmpbin, binfile)
+    return subprocess.run([binfile]).returncode
 
 
 if __name__ == "__main__":

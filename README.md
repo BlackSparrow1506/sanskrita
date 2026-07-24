@@ -63,6 +63,19 @@ python playground.py
 - **आनय Python-bridge** — `आनय "python:math" इति गणितम्।` — 5 lakh libraries
 - New builtins: योजय (append), अपनय (remove), कुञ्जिकाः (keys), क्रमय (sort)
 
+## Two engines, one language
+
+```bash
+sanskrita प्रोग्राम.सं           # interpreter — full language, instant, REPL & playground
+sanskrita --druta प्रोग्राम.सं    # EXPERIMENTAL compiled mode — 1000×+ faster
+```
+
+`--druta` (द्रुत = "fast") transpiles to C, compiles, and caches the binary
+(instant on re-run). It covers a subset — integers, loops, functions, यदि, वद —
+enough to *prove* the compiled path (§7b यन्त्रसङ्कलकः); anything outside the
+subset runs in the interpreter. Same parser, same language, verified identical
+output. Honest benchmarks: `python3 मापनम्.py` → BENCHMARKS.md.
+
 ## New in v0.3 (फलम्)
 
 - **Import your own files:** `आनय "सहायः.सं" इति सहायः।` — build your own libraries in संस्कृता

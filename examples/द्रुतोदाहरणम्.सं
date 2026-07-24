@@ -1,0 +1,40 @@
+# द्रुतोदाहरणम् — runs in BOTH modes:
+#   sanskrita examples/द्रुतोदाहरणम्.सं           (interpreter)
+#   sanskrita --druta examples/द्रुतोदाहरणम्.सं    (compiled — 1000×+ faster)
+#
+# Uses only the द्रुत subset: integers, loops, functions, यदि, वद.
+# (No decimals/strings-as-values/lists yet in compiled mode — those run in the
+#  interpreter. Same language, two engines; see BENCHMARKS.md.)
+
+# १ तः १०००० योगः
+मानय योगः = ०।
+मानय इ = १।
+यावत् (इ <= १००००) {
+    योगः = योगः + इ।
+    इ = इ + १।
+}
+वद("१..१०००० योगः:", योगः)।
+
+# क्रमगुणितम् (factorial)
+विधि क्रमगुणितम्(म) {
+    यदि (म <= १) { फलम् १। }
+    फलम् म * क्रमगुणितम्(म - १)।
+}
+वद("१०! =", क्रमगुणितम्(१०))।
+
+# अभाज्य-गणना (count primes up to 100)
+विधि अभाज्यः(सङ्ख्या) {
+    मानय भ = २।
+    यावत् (भ * भ <= सङ्ख्या) {
+        यदि (सङ्ख्या % भ == ०) { फलम् ०। }
+        भ = भ + १।
+    }
+    फलम् १।
+}
+मानय गणना = ०।
+मानय क = २।
+यावत् (क <= १००) {
+    यदि (अभाज्यः(क) == १) { गणना = गणना + १। }
+    क = क + १।
+}
+वद("१०० पर्यन्तम् अभाज्याः:", गणना)।
