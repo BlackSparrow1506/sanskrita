@@ -340,6 +340,7 @@ impl BigInt {
         if self.sign < 0 { format!("-{}", d) } else { d }
     }
 
+    #[allow(dead_code)] // used by later slices (list indexing, string ops)
     pub fn to_i64(&self) -> Option<i64> {
         let s = self.to_string_signed();
         s.parse::<i64>().ok()

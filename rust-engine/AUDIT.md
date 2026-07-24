@@ -16,15 +16,29 @@ as a test.
 | 7 | **High** | Recursion guard was set above what the stack could hold, so runaway recursion crashed the process (stack overflow) instead of erroring — caught by our own test. | Depth limit is now conservative by default (400, safe for a 2 MB test thread on any build profile) and configurable; the binary runs the program on a 256 MB stack with a 20,000 limit. Deep recursion works; runaway recursion always errors cleanly. |
 | 6 | Low | No `--version`/`--help`; dead-code warnings. | Added; warnings silenced with intent documented. |
 
-## Known, tracked divergences (not bugs — decisions pending)
+## Known, tracked divergences — **all resolved in slice 5** ✓
 
-Listed and checked by `तुल्यता.py` on every run, so they can never be forgotten:
+The three entries below were tracked openly rather than hidden; slice 5 closed
+each, and they are now ordinary must-agree cases in `तुल्यता.py`:
 
-1. **Integer range** — reference is arbitrary-precision, वेगः is i64 with a
-   checked error. Bignum planned alongside decimals (slice 5).
-2. **Decimal division** — `१ / ४` is exact `०.२५` in the reference; वेगः errors
-   until slice 5.
-3. **Type of exact division** — `प्रकारः(१० / ५)` is दशमांशः vs पूर्णाङ्कः; resolves with slice 5.
+1. ~~**Integer range**~~ → वेगः has arbitrary-precision integers (`bigint.rs`).
+   `२५!` and `९२२३३७२०३६८५४७७५८०७ + १` are exact in both engines.
+2. ~~**Decimal division**~~ → `१ / ४` is exact `०.२५` in both (`decimal.rs`).
+3. ~~**Type of exact division**~~ → `/` always yields दशमांशः in both, so a
+   result's *type* never depends on its runtime values.
+
+**Ledger status: empty.** Any future divergence gets added here the moment it
+is found.
+
+### Notes from slice 5 (worth remembering)
+
+- Two "failures" turned out to be **wrong tests, not a wrong engine**:
+  `५.० + ५.०` really is `१०.०` (decimal arithmetic preserves scale) and
+  `सङ्ख्या("४.५") + ०.५` really is `५.०`. Checking against the reference before
+  "fixing" the code is why the differential harness exists.
+- The old `arithmetic_overflow_errors` test became obsolete by design: with
+  bignums there is nothing to overflow, so it was replaced by a test asserting
+  the correct large-number answer.
 
 ## Quality gates now in place
 

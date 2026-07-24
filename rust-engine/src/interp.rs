@@ -411,7 +411,11 @@ impl Interp {
                     }
                     let (q, r) = a.divmod_trunc(b).ok_or_else(div_zero)?;
                     if r.is_zero() {
-                        Ok(Value::Int(q))           // exact: १० / ५ → २
+                        // '/' always yields दशमांशः — even when exact — so the
+                        // result type never depends on the runtime values.
+                        // (Matches the reference: प्रकारः(१० / ५) is दशमांशः,
+                        // while the printed value is still २.)
+                        Ok(Value::Dec(Decimal::from_bigint(q)))
                     } else {
                         let d = Decimal::from_bigint(a.clone())
                             .div(&Decimal::from_bigint(b.clone()), DIV_DIGITS)
@@ -743,8 +747,11 @@ mod tests {
     #[test]
     fn mixed_int_decimal_arithmetic() {
         assert_eq!(shown("मानय प = २ + ०.५।"), "२.५");
-        assert_eq!(shown("मानय प = ५.० + ५.०।"), "१०");      // exact whole result
+        // decimal arithmetic preserves scale, exactly as the reference does:
+        // ५.० + ५.० is १०.०, not १० (value equal, scale remembered)
+        assert_eq!(shown("मानय प = ५.० + ५.०।"), "१०.०");
         assert_eq!(eval_expr("मानय प = ५ == ५.०।"), Value::Bool(true));
+        assert_eq!(eval_expr("मानय प = ५.० + ५.० == १०।"), Value::Bool(true));
     }
 
     #[test]
@@ -753,12 +760,13 @@ mod tests {
         assert_eq!(eval_expr("मानय प = ०.१ < ०.२।"), Value::Bool(true));
         assert_eq!(shown("मानय प = प्रकारः(०.५)।"), "दशमांशः");
         assert_eq!(shown("मानय प = प्रकारः(५)।"), "पूर्णाङ्कः");
-        assert_eq!(shown("मानय प = प्रकारः(१० / ५)।"), "पूर्णाङ्कः");
+        // '/' is decimal division: the TYPE never depends on the values
+        assert_eq!(shown("मानय प = प्रकारः(१० / ५)।"), "दशमांशः");
     }
 
     #[test]
     fn to_number_handles_decimals_and_bignums() {
-        assert_eq!(shown("मानय प = सङ्ख्या(\"४.५\") + ०.५।"), "५");
+        assert_eq!(shown("मानय प = सङ्ख्या(\"४.५\") + ०.५।"), "५.०");
         assert_eq!(shown("मानय प = सङ्ख्या(\"९९९९९९९९९९९९९९९९९९९९\") + १।"),
                    dev_digits("100000000000000000000"));
     }
@@ -799,9 +807,13 @@ mod tests {
         assert_eq!(eval_expr("मानय प = ७ % ३।"), Value::int(1));
     }
 
+    // Slice 5 replaced overflow errors with arbitrary precision: what used to
+    // be an error is now simply the right answer (as in the reference).
     #[test]
-    fn arithmetic_overflow_errors() {
-        assert!(run_ok("मानय क = ९२२३३७२०३६८५४७७५८०७। क = क + १।").is_err());
+    fn beyond_i64_arithmetic_just_works() {
+        assert_eq!(
+            shown("मानय प = ९२२३३७२०३६८५४७७५८०७ + १।"),
+            dev_digits("9223372036854775808"));
     }
 
     #[test]

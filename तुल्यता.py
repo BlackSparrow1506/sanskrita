@@ -52,6 +52,19 @@ PROGRAMS = [
     ('# only a comment\nवद("पश्चात्")।', "comments"),
     ('वद(१ == १, "अ" == "अ", सत्यम् == सत्यम्)।', "equality"),
     ('मानय वर्ष२ = ९। वद(वर्ष२)।', "identifier with digit"),
+    # --- slice 5: exact numbers (previously tracked divergences) ---
+    ('वद(०.१ + ०.२)।', "0.1 + 0.2 is exactly 0.3"),
+    ('वद(०.१ + ०.२ == ०.३)।', "exactness is observable"),
+    ('वद(४५०.५० + ३२०.२५ + ५९९.००)।', "money math"),
+    ('वद(१ / ४, १० / ५, २ + ०.५)।', "division & promotion"),
+    ('वद(५.० + ५.०)।', "decimal scale is preserved"),
+    ('वद(प्रकारः(०.५), प्रकारः(५), प्रकारः(१० / ५))।', "numeric types"),
+    ('मानय क = ९२२३३७२०३६८५४७७५८०७। वद(क + १)।', "beyond i64 (bignum)"),
+    ('विधि फ(म) { यदि (म <= १) { फलम् १। } फलम् म * फ(म - १)। } वद(फ(२५))।',
+     "25! exactly (bignum)"),
+    ('वद(सङ्ख्या("४.५") + ०.५)।', "to-number with decimals"),
+    ('वद(०.३० == ०.३, ०.१ < ०.२)।', "decimal comparison"),
+    ('वद(०-२.५, ०.००१ * ०.००१)।', "negatives & small decimals"),
 ]
 
 # Programs that must FAIL in both engines (error text differs, failure must not)
@@ -68,21 +81,11 @@ MUST_FAIL = [
 # KNOWN, TRACKED divergences — documented rather than hidden.
 # Each must be resolved (or ratified as a language decision) before वेगः is
 # declared complete. This list is the honest ledger of the second implementation.
-KNOWN_DIVERGENCES = [
-    ("integer range",
-     "मानय क = ९२२३३७२०३६८५४७७५८०७। क = क + १।",
-     "Python reference: arbitrary-precision integers (no limit). "
-     "वेगः: i64 with a checked overflow error. "
-     "Decision pending — bignum planned with the decimal slice (5)."),
-    ("decimal division",
-     "वद(१ / ४)।",
-     "Python reference: exact decimal ०.२५. "
-     "वेगः: errors (decimals arrive in slice 5)."),
-    ("type of exact division",
-     "वद(प्रकारः(१० / ५))।",
-     "Python: दशमांशः (Decimal). वेगः: पूर्णाङ्कः. "
-     "Resolves when decimals land in slice 5."),
-]
+#
+# All three original entries (integer range, decimal division, division type)
+# were RESOLVED by slice 5 and promoted into PROGRAMS above, where they are now
+# checked for byte-identical output on every run.
+KNOWN_DIVERGENCES: list = []
 
 
 def build_engine(debug=False):

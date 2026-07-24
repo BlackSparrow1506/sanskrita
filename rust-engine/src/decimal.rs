@@ -20,6 +20,7 @@ impl Decimal {
         Decimal { unscaled: v, scale: 0 }
     }
 
+    #[allow(dead_code)] // used by later slices and by external callers
     pub fn from_i64(v: i64) -> Self {
         Decimal { unscaled: BigInt::from_i64(v), scale: 0 }
     }
