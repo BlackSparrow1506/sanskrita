@@ -1,0 +1,10 @@
+LICENSE
+README.md
+playground.py
+pyproject.toml
+sanskrita.py
+sanskrita.egg-info/PKG-INFO
+sanskrita.egg-info/SOURCES.txt
+sanskrita.egg-info/dependency_links.txt
+sanskrita.egg-info/entry_points.txt
+sanskrita.egg-info/top_level.txt

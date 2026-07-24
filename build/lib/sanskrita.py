@@ -714,8 +714,6 @@ class Parser:
 # ------------------------------------------------------------ environments
 
 class Env:
-    __slots__ = ("vars", "consts", "types", "parent")
-
     def __init__(self, parent=None):
         self.vars = {}
         self.consts = set()
@@ -741,8 +739,6 @@ class Env:
 # --------------------------------------------------------- runtime values
 
 class SFunction:
-    __slots__ = ("name", "params", "body", "closure")
-
     def __init__(self, name, params, body, closure):
         self.name = name
         self.params = params          # list of (kāraka-label or None, name)
@@ -1216,23 +1212,6 @@ class Interpreter:
         elif kind == "assign":
             _, target, vexpr, line = st
             val = self.eval(vexpr, env)
-            if target[0] == "var":                     # hot path: plain reassign
-                name = target[1]
-                en = env
-                while en is not None:
-                    if name in en.vars:
-                        if name in en.consts:
-                            raise SanskritaError(line,
-                                                 f"'{name}' ध्रुवः — परिवर्तनं न शक्यम्",
-                                                 f"'{name}' is a constant — cannot change it")
-                        if en.types and name in en.types:
-                            self.check_type(name, en.types[name], val, line)
-                        en.vars[name] = val
-                        return
-                    en = en.parent
-                raise SanskritaError(line,
-                                     f"'{name}' अघोषितम् — प्रथमं 'मानय' प्रयुज्यताम्",
-                                     f"'{name}' not declared — declare it first with मानय/maanaya")
             self.assign(target, val, env, line)
         elif kind == "break":
             raise BreakSignal(st[1])
@@ -1409,17 +1388,14 @@ class Interpreter:
         kind = e[0]
         if kind == "lit":
             return e[1]
-        if kind == "var":                              # hot path: inline the walk
-            name = e[1]
-            en = env
-            while en is not None:
-                v = en.vars
-                if name in v:
-                    return v[name]
-                en = en.parent
-            sa_h, en_h = hint_for(name, env.all_names())
-            raise SanskritaError(e[2], f"अज्ञातं नाम '{name}'{sa_h}",
-                                 f"unknown name '{name}'{en_h}")
+        if kind == "var":
+            _, name, line = e
+            holder = env.find(name)
+            if holder is None:
+                sa_h, en_h = hint_for(name, env.all_names())
+                raise SanskritaError(line, f"अज्ञातं नाम '{name}'{sa_h}",
+                                     f"unknown name '{name}'{en_h}")
+            return holder.vars[name]
         if kind == "list":
             return [self.eval(x, env) for x in e[1]]
         if kind == "map":
@@ -1570,18 +1546,6 @@ class Interpreter:
 
     def call_function(self, fn, args, line, self_val=None):
         local = Env(parent=fn.closure)
-        params = fn.params
-        # hot path: all-positional call with matching arity, no self/labels
-        if (self_val is None and len(args) == len(params)
-                and not any(lab is not None for lab, _ in args)):
-            lv = local.vars
-            for (lab, v), (plab, pname) in zip(args, params):
-                lv[pname] = v
-            try:
-                self.run(fn.body, local)
-            except ReturnSignal as r:
-                return r.value
-            return None
         if self_val is not None:
             local.vars["अयम्"] = self_val
         positional = [v for lab, v in args if lab is None]
@@ -1699,19 +1663,6 @@ class Interpreter:
         return {"<": a < b, ">": a > b, "<=": a <= b, ">=": a >= b}[op]
 
     def arith(self, op, a, b, line):
-        ta = type(a); tb = type(b)
-        if ta is int and tb is int:                    # hot path: whole-number math
-            if op == "+":
-                return a + b
-            if op == "-":
-                return a - b
-            if op == "*":
-                return a * b
-            if op == "%":
-                if b == 0:
-                    raise SanskritaError(line, "शून्येन भागो न शक्यः", "division by zero")
-                return a % b
-            # '/' falls through to exact-decimal handling below
         if isinstance(a, bool) or isinstance(b, bool):
             raise SanskritaError(line, "सत्यासत्येन गणितं न शक्यम्",
                                  "cannot do arithmetic with सत्यम्/असत्यम्")
