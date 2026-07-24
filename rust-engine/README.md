@@ -15,7 +15,9 @@ Built incrementally so every step is compilable and testable:
 - [x] **Slice 3 — evaluator**: मानय/ध्रुव, assignment, integer arithmetic,
   comparisons, च/वा/न, यदि/अथ/अन्यथा, यावत्, विरम/अनुवर्त, वद, वाक्यम्,
   दैर्घ्यम्, प्रकारः, सङ्ख्या. **Runs real programs natively.**
-- [ ] Slice 4 — functions, फलम्, recursion
+- [x] **Slice 4 — functions**: `विधि` definitions & calls, `फलम्` returns,
+  recursion (depth-guarded), lexical scoping, and **kāraka-labeled arguments**
+  (`प्रे(सम्प्रदान: …, कर्म: …)` — any order), with arity/role errors.
 - [ ] Slice 5 — exact decimals (the correctness promise)
 - [ ] Slice 5 — exact decimals (the correctness promise), strings-as-values
 - [ ] Slice 6 — lists, maps, classes, प्रयत/दोषे

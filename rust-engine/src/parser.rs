@@ -3,8 +3,11 @@
 // यावत्, विरम/अनुवर्त, arithmetic, comparisons, च/वा/न, literals.
 // (Functions, lists, classes: later slices.)
 
-use crate::ast::{Expr, Stmt};
+use crate::ast::{Arg, Expr, Param, Stmt};
 use crate::token::{Tok, Token};
+
+/// Pāṇini's six kārakas — the only valid argument role labels.
+const KARAKAS: &[&str] = &["कर्ता", "कर्म", "करण", "सम्प्रदान", "अपादान", "अधिकरण"];
 
 pub struct Parser {
     toks: Vec<Token>,
@@ -105,6 +108,32 @@ impl Parser {
             self.eat_end()?;
             return Ok(Stmt::Continue(line));
         }
+        if self.is_kw("विधि") {
+            self.advance();
+            let name = self.ident("विधिनाम अपेक्षितम् / expected a function name")?;
+            self.eat_op("(")?;
+            let mut params = Vec::new();
+            if !self.is_op(")") {
+                params.push(self.param()?);
+                while self.is_op(",") {
+                    self.advance();
+                    params.push(self.param()?);
+                }
+            }
+            self.eat_op(")")?;
+            let body = self.block()?;
+            return Ok(Stmt::Func { name, params, body, line });
+        }
+        if self.is_kw("फलम्") {
+            self.advance();
+            let expr = if matches!(self.peek().tok, Tok::End) {
+                None
+            } else {
+                Some(self.expression()?)
+            };
+            self.eat_end()?;
+            return Ok(Stmt::Return { expr, line });
+        }
         if self.is_kw("यदि") {
             return self.if_stmt();
         }
@@ -165,6 +194,45 @@ impl Parser {
             }
         }
         Ok(Stmt::If { branches, else_body, line })
+    }
+
+    /// Parameter: `नाम` or `कर्म नाम` (kāraka role + name).
+    fn param(&mut self) -> PResult<Param> {
+        let line = self.line();
+        let first = self.ident("मापदण्डनाम अपेक्षितम् / expected a parameter name")?;
+        if matches!(self.peek().tok, Tok::Id(_)) {
+            // two identifiers in a row → the first must be a kāraka
+            if !KARAKAS.contains(&first.as_str()) {
+                return Err(format!(
+                    "दोषः पङ्क्तौ {} — '{}' कारकं न — कारकाणि: कर्ता, कर्म, करण, सम्प्रदान, अपादान, अधिकरण\n\
+                     Error at line {} — '{}' is not a kāraka role",
+                    line, first, line, first));
+            }
+            let name = self.ident("मापदण्डनाम अपेक्षितम्")?;
+            return Ok(Param { karaka: Some(first), name });
+        }
+        Ok(Param { karaka: None, name: first })
+    }
+
+    /// Argument: `मूल्यम्` or `कर्म: मूल्यम्` (kāraka-labeled).
+    fn argument(&mut self) -> PResult<Arg> {
+        if let Tok::Id(label) = &self.peek().tok {
+            let label = label.clone();
+            if matches!(self.toks.get(self.pos + 1).map(|t| &t.tok),
+                        Some(Tok::Op(o)) if o == ":") {
+                let line = self.line();
+                if !KARAKAS.contains(&label.as_str()) {
+                    return Err(format!(
+                        "दोषः पङ्क्तौ {} — '{}' कारकं न / '{}' is not a kāraka label",
+                        line, label, label));
+                }
+                self.advance(); // label
+                self.advance(); // :
+                let value = self.expression()?;
+                return Ok(Arg { karaka: Some(label), value });
+            }
+        }
+        Ok(Arg { karaka: None, value: self.expression()? })
     }
 
     fn ident(&mut self, msg: &str) -> PResult<String> {
@@ -292,10 +360,10 @@ impl Parser {
                     self.advance(); // (
                     let mut args = Vec::new();
                     if !self.is_op(")") {
-                        args.push(self.expression()?);
+                        args.push(self.argument()?);
                         while self.is_op(",") {
                             self.advance();
-                            args.push(self.expression()?);
+                            args.push(self.argument()?);
                         }
                     }
                     self.eat_op(")")?;
