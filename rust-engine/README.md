@@ -27,10 +27,12 @@ Built incrementally so every step is compilable and testable:
 
 Loop sum 1..50,000 — `मानय स = ०। मानय इ = १। यावत् (इ <= ५००००) {…}`
 
-| Engine | time |
-|---|---|
-| Python interpreter (`sanskrita.py`) | ~106 ms |
-| **वेगः (Rust, release, naive tree-walker)** | **~20 ms (user)** |
+| Workload | Python engine | वेगः (Rust) |
+|---|---|---|
+| loop sum 1..50,000 | ~106 ms | **~20 ms** |
+| `examples/द्रुतोदाहरणम्.सं` — loops + recursion + primes (wall clock) | 120 ms | **8 ms** |
+
+Identical output from both engines, verified byte-for-byte.
 
 ~5× faster with zero optimization work — the first real evidence for the
 blueprint's speed promise. Correct answer (१२५००२५०००) verified against the

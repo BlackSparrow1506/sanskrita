@@ -27,6 +27,7 @@ Measured on Apple Silicon MacBook, `cargo build --release`, slices 1–3
 | Workload | Python engine | वेगः (Rust) | gain |
 |---|---|---|---|
 | loop sum 1..50,000 | ~106 ms | **~20 ms** | ~5× |
+| examples/द्रुतोदाहरणम्.सं (loop + factorial recursion + prime counting, wall clock incl. startup) | 120 ms | **8 ms** | **~15×** |
 
 Same program, same answer (१२५००२५०००). This is the first measured evidence
 for the blueprint's speed promise — and it is the *slowest* the Rust engine will
