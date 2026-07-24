@@ -39,6 +39,12 @@ pub fn has(module: &str, name: &str) -> bool {
     members(module).contains(&name)
 }
 
+/// Members that are CONSTANTS, not functions: `ग.पाई` yields the number
+/// directly (no parentheses), exactly as in the reference.
+pub fn is_const(module: &str, name: &str) -> bool {
+    matches!((module, name), ("गणितम्", "पाई") | ("गणितम्", "ई"))
+}
+
 /// Return the &'static str for a member name (so Value::Native can hold it).
 pub fn intern(module: &str, name: &str) -> &'static str {
     members(module).iter().find(|m| **m == name).copied().unwrap_or("")

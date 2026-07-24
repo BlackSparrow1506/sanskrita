@@ -507,6 +507,13 @@ impl Interp {
                     }
                     Value::Module(m) => {
                         if crate::stdlib::has(m, name) {
+                            // constants (गणितम्.पाई) evaluate on access;
+                            // functions become callable handles
+                            if crate::stdlib::is_const(m, name) {
+                                return crate::stdlib::call(
+                                    self, m, crate::stdlib::intern(m, name),
+                                    Vec::new(), *line);
+                            }
                             Ok(Value::Native(m, crate::stdlib::intern(m, name)))
                         } else {
                             Err(err2(*line,
@@ -1342,7 +1349,9 @@ mod tests {
             "अ • ब");
         assert_eq!(
             shown("आनय \"वाक्यकर्म\" इति वाक्। मानय प = वाक्.खोज(\"नमस्ते\", \"स्ते\")।"),
-            "४");
+            // न(1) म(2) स(3) — the virama is its own character, so "स्ते"
+            // begins at position ३ (verified against the reference)
+            "३");
         assert_eq!(
             shown("आनय \"वाक्यकर्म\" इति वाक्। मानय प = वाक्.अंश(\"संस्कृता\", १, ३)।"),
             "संस");
