@@ -76,6 +76,8 @@ pub enum Stmt {
     Class { name: String, parent: Option<String>, methods: Vec<Method>, line: usize },
     /// `प्रयत { … } दोषे (त्रुटिः) { … }`
     Try { body: Vec<Stmt>, err_name: String, catch: Vec<Stmt>, line: usize },
+    /// `आनय "संस्कृतम्" इति सं।` — native module or the user's own .सं file
+    Import { module: String, alias: String, line: usize },
     Return { expr: Option<Expr>, line: usize },
     Break(usize),
     Continue(usize),

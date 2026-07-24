@@ -70,6 +70,12 @@ pub enum Value {
     Object(Rc<Instance>),
     /// A method bound to its object: `वस्तु.विधि`
     Bound(Rc<Instance>, Rc<Function>),
+    /// A native stdlib module (संस्कृतम्, गणितम्, …) — `सं.छन्दः(…)`
+    Module(&'static str),
+    /// A native module function, already resolved: `सं.छन्दः`
+    Native(&'static str, &'static str),
+    /// A user's own .सं file imported as a namespace
+    UserModule(Rc<RefCell<HashMap<String, Value>>>, String),
 }
 
 /// Insertion-ordered map: Python dicts preserve insertion order, and our
@@ -144,11 +150,12 @@ impl Value {
             Value::Str(_) => "वाक्यम्",
             Value::Bool(_) => "सत्यासत्यम्",
             Value::Nil => "शून्यम्",
-            Value::Func(_) | Value::Bound(..) => "विधिः",
+            Value::Func(_) | Value::Bound(..) | Value::Native(..) => "विधिः",
             Value::List(_) => "सूची",
             Value::Map(_) => "कोशः",
             Value::Class(_) => "वर्गः",
             Value::Object(_) => "वस्तु",
+            Value::Module(_) | Value::UserModule(..) => "कोष्ठकम्",
         }
     }
 }
@@ -186,6 +193,9 @@ impl PartialEq for Value {
             }
             (Value::Class(a), Value::Class(b)) => Rc::ptr_eq(a, b),
             (Value::Object(a), Value::Object(b)) => Rc::ptr_eq(a, b),
+            (Value::Module(a), Value::Module(b)) => a == b,
+            (Value::Native(m1, f1), Value::Native(m2, f2)) => m1 == m2 && f1 == f2,
+            (Value::UserModule(a, _), Value::UserModule(b, _)) => Rc::ptr_eq(a, b),
             _ => false,
         }
     }

@@ -165,6 +165,24 @@ impl Parser {
             let catch = self.block()?;
             return Ok(Stmt::Try { body, err_name, catch, line });
         }
+        if self.is_kw("आनय") {
+            self.advance();
+            let module = match &self.peek().tok {
+                Tok::Str(s) => {
+                    let s = s.clone();
+                    self.advance();
+                    s
+                }
+                _ => return Err(format!(
+                    "दोषः पङ्क्तौ {} — आनय-अनन्तरं कोष्ठकनाम अपेक्षितम्\n\
+                     Error at line {} — expected a module string after आनय",
+                    line, line)),
+            };
+            self.eat_kw("इति")?;
+            let alias = self.ident("नाम अपेक्षितम् / expected a name")?;
+            self.eat_end()?;
+            return Ok(Stmt::Import { module, alias, line });
+        }
         if self.is_kw("प्रत्येकम्") {
             self.advance();
             let var = self.ident("चरनाम अपेक्षितम् / expected a loop variable")?;

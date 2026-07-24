@@ -46,6 +46,10 @@ pub struct Interp {
     max_depth: usize,
     anchor: usize,
     stack_budget: usize,
+    /// Folder of the running file — imports resolve relative to it.
+    pub source_dir: Option<std::path::PathBuf>,
+    /// Import cache: a file runs once, however many times it is imported.
+    modules: HashMap<String, Value>,
 }
 
 type RResult<T> = Result<T, String>;
@@ -76,6 +80,8 @@ impl Interp {
             max_depth: DEFAULT_MAX_DEPTH,
             anchor: &probe as *const u8 as usize,
             stack_budget: DEFAULT_STACK_BUDGET,
+            source_dir: None,
+            modules: HashMap::new(),
         }
     }
 
@@ -253,6 +259,35 @@ impl Interp {
                 self.scopes[cur].vars.insert(name.clone(), class);
                 Ok(Flow::Normal)
             }
+            Stmt::Import { module, alias, line } => {
+                const NATIVE: &[&str] = &["संस्कृतम्", "गणितम्", "यादृच्छिकम्",
+                                          "कालः", "वाक्यकर्म"];
+                let canon = match module.as_str() {
+                    "sanskritam" => "संस्कृतम्",
+                    "ganitam" => "गणितम्",
+                    "yadrcchikam" => "यादृच्छिकम्",
+                    "kalah" => "कालः",
+                    "vakyakarma" => "वाक्यकर्म",
+                    other => other,
+                };
+                if let Some(found) = NATIVE.iter().find(|m| **m == canon) {
+                    let cur = self.current;
+                    self.scopes[cur].vars.insert(alias.clone(), Value::Module(found));
+                    return Ok(Flow::Normal);
+                }
+                if canon.starts_with("python:") {
+                    return Err(err2(*line,
+                        "python-सेतुः वेगे नास्ति — मूल-इञ्जिने (sanskrita.py) प्रयुज्यताम्",
+                        "the python bridge is not available in the वेगः engine — \
+                         use the reference engine (sanskrita.py) for python: imports"));
+                }
+                if canon.ends_with(".सं") || canon.ends_with(".sam") {
+                    return self.import_file(canon, alias, *line);
+                }
+                Err(err2(*line,
+                    &format!("'{}' इति कोष्ठकं न ज्ञातम्", canon),
+                    &format!("unknown module '{}'", canon)))
+            }
             Stmt::Try { body, err_name, catch, line: _ } => {
                 match self.exec_block(body) {
                     Ok(flow) => Ok(flow),
@@ -326,6 +361,44 @@ impl Interp {
                 Ok(Flow::Normal)
             }
         }
+    }
+
+    /// Run another .सं file once and expose its top-level names as a module.
+    fn import_file(&mut self, rel: &str, alias: &str, line: usize) -> RResult<Flow> {
+        use std::path::PathBuf;
+        let base: PathBuf = self.source_dir.clone().unwrap_or_else(|| PathBuf::from("."));
+        let path = base.join(rel);
+        let key = path.to_string_lossy().to_string();
+        if let Some(m) = self.modules.get(&key) {
+            let m = m.clone();
+            let cur = self.current;
+            self.scopes[cur].vars.insert(alias.to_string(), m);
+            return Ok(Flow::Normal);
+        }
+        let src = std::fs::read_to_string(&path).map_err(|_| err2(line,
+            &format!("सञ्चिका '{}' न प्राप्ता", rel),
+            &format!("file '{}' not found (looked in {})", rel, base.display())))?;
+        let toks = crate::lexer::lex(&src)?;
+        let stmts = crate::parser::Parser::new(toks).program()?;
+
+        // run the file in a fresh global scope, then capture its bindings
+        let saved_scopes = std::mem::replace(&mut self.scopes, vec![Scope::new(None)]);
+        let saved_current = self.current;
+        let saved_dir = self.source_dir.clone();
+        self.current = 0;
+        self.source_dir = path.parent().map(|p| p.to_path_buf());
+        let result = self.exec_block(&stmts);
+        let captured: HashMap<String, Value> = self.scopes[0].vars.clone();
+        self.scopes = saved_scopes;
+        self.current = saved_current;
+        self.source_dir = saved_dir;
+        result?;
+
+        let module = Value::UserModule(Rc::new(RefCell::new(captured)), alias.to_string());
+        self.modules.insert(key, module.clone());
+        let cur = self.current;
+        self.scopes[cur].vars.insert(alias.to_string(), module);
+        Ok(Flow::Normal)
     }
 
     fn truth(&mut self, e: &Expr) -> RResult<bool> {
@@ -430,6 +503,23 @@ impl Interp {
                             None => Err(err2(*line,
                                 &format!("'{}' वस्तुनि '{}' नास्ति", inst.class.name, name),
                                 &format!("'{}' object has no '{}'", inst.class.name, name))),
+                        }
+                    }
+                    Value::Module(m) => {
+                        if crate::stdlib::has(m, name) {
+                            Ok(Value::Native(m, crate::stdlib::intern(m, name)))
+                        } else {
+                            Err(err2(*line,
+                                &format!("'{}' कोष्ठके '{}' नास्ति", m, name),
+                                &format!("module '{}' has no '{}'", m, name)))
+                        }
+                    }
+                    Value::UserModule(map, mname) => {
+                        match map.borrow().get(name) {
+                            Some(v) => Ok(v.clone()),
+                            None => Err(err2(*line,
+                                &format!("'{}' कोष्ठके '{}' नास्ति", mname, name),
+                                &format!("module '{}' has no '{}'", mname, name))),
                         }
                     }
                     _ => Err(err2(*line,
@@ -573,6 +663,18 @@ impl Interp {
 
     fn call_value(&mut self, f: &Value, args: &[Arg], line: usize) -> RResult<Value> {
         match f {
+            Value::Native(module, name) => {
+                let mut vals = Vec::with_capacity(args.len());
+                for a in args {
+                    if a.karaka.is_some() {
+                        return Err(err2(line,
+                            "कोष्ठक-विधयः कारकं न गृह्णन्ति",
+                            "module functions do not take kāraka labels"));
+                    }
+                    vals.push(self.eval(&a.value)?);
+                }
+                crate::stdlib::call(self, module, name, vals, line)
+            }
             Value::Func(func) => self.call_function(func, args, line, None),
             Value::Bound(inst, func) => self.call_function(func, args, line, Some(inst.clone())),
             Value::Class(class) => self.instantiate(class, args, line),
@@ -1186,6 +1288,73 @@ mod tests {
     fn program_continues_after_caught_error() {
         assert_eq!(
             shown("मानय प = ०। प्रयत { मानय क = १ / ०। } दोषे (त्रु) { } प = ७।"), "७");
+    }
+
+    // ---- slice 7: modules & stdlib ----
+
+    #[test]
+    fn sanskritam_module() {
+        assert_eq!(
+            shown("आनय \"संस्कृतम्\" इति सं। मानय प = सं.संधय(\"देव\", \"आलयः\")।"),
+            "देवालयः");
+        assert_eq!(
+            shown("आनय \"संस्कृतम्\" इति सं। मानय प = सं.संधय(\"रामः\", \"गच्छति\")।"),
+            "रामो गच्छति");
+        assert_eq!(
+            shown("आनय \"संस्कृतम्\" इति सं। मानय प = सं.अक्षरगणना(\"नमस्ते\")।"), "३");
+        assert_eq!(
+            shown("आनय \"संस्कृतम्\" इति सं। मानय प = सं.रोमनय(\"संस्कृता\")।"),
+            "saṃskṛtā");
+        assert_eq!(
+            shown("आनय \"संस्कृतम्\" इति सं। मानय प = सं.अक्षराणि(\"नमस्ते\")।"),
+            "[\"न\", \"म\", \"स्ते\"]");
+    }
+
+    #[test]
+    fn gita_meter_through_the_language() {
+        let out = shown(
+            "आनय \"संस्कृतम्\" इति सं। \
+             मानय श = \"धर्मक्षेत्रे कुरुक्षेत्रे समवेता युयुत्सवः \
+             मामकाः पाण्डवाश्चैव किमकुर्वत सञ्जय\"। \
+             मानय प = सं.छन्दः(श)।");
+        assert!(out.starts_with("अनुष्टुभ्"), "got: {}", out);
+    }
+
+    #[test]
+    fn ganitam_module() {
+        assert_eq!(shown("आनय \"गणितम्\" इति ग। मानय प = ग.वर्गमूलम्(१४४)।"), "१२");
+        assert_eq!(shown("आनय \"गणितम्\" इति ग। मानय प = ग.उपरितलम्(४.२)।"), "५");
+        assert_eq!(shown("आनय \"गणितम्\" इति ग। मानय प = ग.तलम्(४.८)।"), "४");
+        assert!(shown("आनय \"गणितम्\" इति ग। मानय प = ग.पाई।").starts_with("३.१४१५"));
+    }
+
+    #[test]
+    fn vakyakarma_module() {
+        assert_eq!(
+            shown("आनय \"वाक्यकर्म\" इति वाक्। मानय प = वाक्.विभज(\"अ-ब-स\", \"-\")।"),
+            "[\"अ\", \"ब\", \"स\"]");
+        assert_eq!(
+            shown("आनय \"वाक्यकर्म\" इति वाक्। \
+                   मानय प = वाक्.संयोजय([\"अ\", \"ब\"], \" • \")।"),
+            "अ • ब");
+        assert_eq!(
+            shown("आनय \"वाक्यकर्म\" इति वाक्। मानय प = वाक्.खोज(\"नमस्ते\", \"स्ते\")।"),
+            "४");
+        assert_eq!(
+            shown("आनय \"वाक्यकर्म\" इति वाक्। मानय प = वाक्.अंश(\"संस्कृता\", १, ३)।"),
+            "संस");
+    }
+
+    #[test]
+    fn unknown_module_and_member_error() {
+        assert!(run_ok("आनय \"अज्ञातम्\" इति अ।").is_err());
+        assert!(run_ok("आनय \"गणितम्\" इति ग। वद(ग.अज्ञातम्)।").is_err());
+    }
+
+    #[test]
+    fn python_bridge_is_refused_clearly() {
+        let e = run_ok("आनय \"python:math\" इति म।").unwrap_err();
+        assert!(e.contains("python"), "got: {}", e);
     }
 
     // ---- recursion guards (unchanged behaviour) ----

@@ -1,6 +1,6 @@
 // main.rs — संस्कृता वेगः engine (native Rust).
-// Slices 1–6: lexer, parser, evaluator — exact numbers, functions,
-// collections, classes, try/catch.
+// Slices 1–7: the complete language — exact numbers, functions, collections,
+// classes, try/catch, modules and the संस्कृतम् stdlib.
 //
 // Build:  cargo build --release
 // Test:   cargo test
@@ -14,6 +14,8 @@ mod nfc;
 mod lexer;
 mod ast;
 mod value;
+mod sanskritam;
+mod stdlib;
 mod parser;
 mod interp;
 
@@ -37,7 +39,7 @@ const RUN_STACK_BUDGET: usize = 192 * 1024 * 1024;
 fn main() {
     let args: Vec<String> = env::args().collect();
     if args.iter().any(|a| a == "--version") {
-        println!("वेगः — संस्कृता native engine v{} (slices 1–6)", VERSION);
+        println!("वेगः — संस्कृता native engine v{} (slices 1–7)", VERSION);
         return;
     }
     if args.len() < 2 || args.iter().any(|a| a == "--help") {
@@ -47,6 +49,7 @@ fn main() {
         process::exit(if args.len() < 2 { 1 } else { 0 });
     }
     let path = args[1].clone();
+    let dir = std::path::Path::new(&path).parent().map(|p| p.to_path_buf());
     let src = match fs::read_to_string(&path) {
         Ok(s) => s,
         Err(e) => {
@@ -57,7 +60,7 @@ fn main() {
 
     let handle = thread::Builder::new()
         .stack_size(STACK_BYTES)
-        .spawn(move || run(&src))
+        .spawn(move || run(&src, dir))
         .expect("could not start the interpreter thread");
 
     match handle.join() {
@@ -73,10 +76,10 @@ fn main() {
     }
 }
 
-fn run(src: &str) -> Result<(), String> {
+fn run(src: &str, dir: Option<std::path::PathBuf>) -> Result<(), String> {
     let toks = lexer::lex(src)?;
     let stmts = parser::Parser::new(toks).program()?;
-    interp::Interp::new()
-        .with_limits(RUN_MAX_DEPTH, RUN_STACK_BUDGET)
-        .run(&stmts)
+    let mut it = interp::Interp::new().with_limits(RUN_MAX_DEPTH, RUN_STACK_BUDGET);
+    it.source_dir = dir;
+    it.run(&stmts)
 }
