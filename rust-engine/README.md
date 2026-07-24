@@ -5,7 +5,7 @@ Python. The Python interpreter (`../sanskrita.py`) stays as the **reference
 implementation**; this engine is correct when it produces identical results and
 passes the conformance suite (`../परीक्षा.py`, 51 cases).
 
-## Status: **slices 1–3 — it runs programs** (incremental)
+## Status: **slices 1–5 — exact numbers, functions, recursion** (incremental)
 
 Built incrementally so every step is compilable and testable:
 
@@ -18,8 +18,10 @@ Built incrementally so every step is compilable and testable:
 - [x] **Slice 4 — functions**: `विधि` definitions & calls, `फलम्` returns,
   recursion (depth-guarded), lexical scoping, and **kāraka-labeled arguments**
   (`प्रे(सम्प्रदान: …, कर्म: …)` — any order), with arity/role errors.
-- [ ] Slice 5 — exact decimals (the correctness promise)
-- [ ] Slice 5 — exact decimals (the correctness promise), strings-as-values
+- [x] **Slice 5 — exact numbers**: arbitrary-precision integers (`bigint.rs`)
+  and exact decimals (`decimal.rs`), both hand-written with **no dependencies**.
+  `०.१ + ०.२ == ०.३`, `२५!` exact, int↔decimal promotion, floored `%`.
+  All three tracked divergences with the reference are now closed.
 - [ ] Slice 6 — lists, maps, classes, प्रयत/दोषे
 - [ ] Slice 7 — kāraka arguments, संस्कृतम् stdlib, conformance parity
 
