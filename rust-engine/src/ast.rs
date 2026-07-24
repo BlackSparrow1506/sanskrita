@@ -16,6 +16,9 @@ pub struct Arg {
     pub value: Expr,
 }
 
+// Every node carries its source line for error messages; a few are not read
+// yet (list literals cannot currently fail at runtime), hence the allow.
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub enum Expr {
     /// Numeric literal as typed (digits, optional '.') — converted to an exact

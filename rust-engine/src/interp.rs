@@ -1183,16 +1183,21 @@ mod tests {
         assert!(result.is_err());
     }
 
+    // Legitimately deep (but bounded) recursion must work. Note the generous
+    // stack: each संस्कृता call costs several native frames, and debug builds
+    // make them fat — slice 6's richer Value enum widened them further. The
+    // budget is set well inside the thread's stack so the guard, not the OS,
+    // decides. (The shipped binary uses 256 MB / 192 MB — see main.rs.)
     #[test]
     fn moderate_recursion_works() {
         let handle = std::thread::Builder::new()
-            .stack_size(8 * 1024 * 1024)
+            .stack_size(64 * 1024 * 1024)
             .spawn(|| {
                 let src = "विधि गण(म) { यदि (म <= ०) { फलम् ०। } फलम् १ + गण(म - १)। } \
                            मानय प = गण(२००)।";
                 let toks = lex(src).unwrap();
                 let stmts = Parser::new(toks).program().unwrap();
-                let mut it = Interp::new().with_limits(1_000_000, 4 * 1024 * 1024);
+                let mut it = Interp::new().with_limits(1_000_000, 48 * 1024 * 1024);
                 it.run(&stmts)?;
                 match it.scopes[0].vars.get("प") {
                     Some(Value::Int(n)) => Ok(n.to_string_signed()),

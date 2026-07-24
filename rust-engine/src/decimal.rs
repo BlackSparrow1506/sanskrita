@@ -48,6 +48,7 @@ impl Decimal {
         Some(Decimal { unscaled, scale: frac_part.len() })
     }
 
+    #[allow(dead_code)] // used by the reference-parity checks and later slices
     pub fn is_integer(&self) -> bool {
         self.scale == 0
     }

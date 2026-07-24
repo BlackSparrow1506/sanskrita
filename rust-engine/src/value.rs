@@ -8,7 +8,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use crate::ast::{Method, Param, Stmt};
+use crate::ast::{Param, Stmt};
 use crate::bigint::BigInt;
 use crate::decimal::Decimal;
 
