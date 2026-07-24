@@ -257,8 +257,14 @@ impl Interp {
                 match self.exec_block(body) {
                     Ok(flow) => Ok(flow),
                     Err(msg) => {
-                        // bind the Sanskrit half of the message, like the reference
-                        let sa = msg.lines().next().unwrap_or(&msg).to_string();
+                        // Bind only the Sanskrit MESSAGE — not the "दोषः पङ्क्तौ N — "
+                        // prefix and not the English line — matching the reference,
+                        // which stores err.sa.
+                        let first = msg.lines().next().unwrap_or(&msg);
+                        let sa = match first.split_once(" — ") {
+                            Some((_, rest)) => rest.to_string(),
+                            None => first.to_string(),
+                        };
                         let cur = self.current;
                         self.scopes[cur].vars.insert(err_name.clone(), Value::Str(sa));
                         self.exec_block(catch)
@@ -1150,6 +1156,24 @@ mod tests {
     fn try_binds_error_message() {
         let out = shown("मानय प = \"\"। प्रयत { वद(अज्ञातनाम)। } दोषे (त्रु) { प = त्रु। }");
         assert!(out.contains("अज्ञातं नाम"), "got: {}", out);
+        // …and ONLY the message: no "दोषः पङ्क्तौ N — " prefix, no English line
+        assert!(!out.contains("पङ्क्तौ"), "prefix leaked into the bound value: {}", out);
+        assert!(!out.contains("Error at line"), "english leaked in: {}", out);
+    }
+
+    #[test]
+    fn caught_division_message_matches_reference() {
+        assert_eq!(
+            shown("मानय प = \"\"। प्रयत { मानय क = १ / ०। } दोषे (त्रु) { प = त्रु। }"),
+            "शून्येन भागो न शक्यः");
+    }
+
+    #[test]
+    fn division_precision_matches_reference() {
+        // 28 significant digits, half-even — the वर्गाः.सं average
+        assert_eq!(shown("मानय प = (९५ + ८८ + ९२) / ३।"),
+                   dev_digits("91.66666666666666666666666667"));
+        assert_eq!(shown("मानय प = (७५ + ८५) / २।"), "८०");
     }
 
     #[test]

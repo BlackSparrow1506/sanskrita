@@ -116,6 +116,33 @@ def run_rust(binary, src):
     return r.returncode == 0, r.stdout.decode()
 
 
+# Whole example programs that both engines must run identically. Only those
+# inside वेगः's current feature set are listed; the rest join as slices land.
+EXAMPLE_FILES = [
+    "नमस्ते.सं",
+    "गणना.सं",
+    "गुणनसारणी.सं",
+    "श्रेणी.सं",
+    "क्रमगुणितम्.सं",
+    "अभाज्यता.सं",
+    "व्याजगणना.सं",
+    "नियन्त्रणम्.सं",
+    "विधयः.सं",
+    "सूचीकोशौ.सं",
+    "वर्गाः.सं",
+    "दोषनिवारणम्.सं",
+    "द्रुतोदाहरणम्.सं",
+    "अङ्कतालिका.सं",
+    "व्ययगणकः.सं",
+    "प्रतिमानानि.सं",
+]
+
+
+def run_python_file(path):
+    src = open(path, encoding="utf-8").read()
+    return run_python(src)
+
+
 def main():
     debug = "--debug" in sys.argv
     print("तुल्यता — differential test (Python reference ⟷ वेगः Rust engine)")
@@ -153,6 +180,31 @@ def main():
             fails += 1
         else:
             print(f"  ✓ {name}")
+
+    print("\n— whole example programs (byte-identical output required) —")
+    ex_dir = os.path.join(HERE, "examples")
+    for fname in EXAMPLE_FILES:
+        path = os.path.join(ex_dir, fname)
+        if not os.path.exists(path):
+            print(f"  – {fname}: not found, skipped")
+            continue
+        src = open(path, encoding="utf-8").read()
+        p_ok, p_out = run_python(src)
+        r_ok, r_out = run_rust(binary, src)
+        if not p_ok:
+            print(f"  ! {fname}: python reference errored")
+            fails += 1
+        elif not r_ok:
+            print(f"  ✗ {fname}: वेगः errored, python succeeded")
+            fails += 1
+        elif p_out != r_out:
+            print(f"  ✗ {fname}: DIVERGENCE")
+            for a, b in zip(p_out.splitlines(), r_out.splitlines()):
+                if a != b:
+                    print(f"      python: {a!r}\n      veg   : {b!r}")
+            fails += 1
+        else:
+            print(f"  ✓ {fname}")
 
     print("\n— known, tracked divergences (not failures) —")
     for name, src, note in KNOWN_DIVERGENCES:

@@ -91,21 +91,77 @@ impl Decimal {
         }
     }
 
-    /// Exact division where possible; otherwise rounded to `max_digits`
-    /// significant fractional digits (the reference uses 28-digit precision).
-    pub fn div(&self, other: &Decimal, max_digits: usize) -> Option<Decimal> {
+    /// Division with the reference's semantics: exact when the quotient fits,
+    /// otherwise rounded to `prec` SIGNIFICANT digits, half-even.
+    ///
+    /// (Python's `decimal` defaults to 28 significant digits — not 28
+    /// fractional digits — so २७५/३ is ९१.६६…६७, with the final digit rounded.
+    /// Truncating instead would silently disagree with the reference.)
+    pub fn div(&self, other: &Decimal, prec: usize) -> Option<Decimal> {
         if other.is_zero() {
             return None;
         }
-        // value = (ua × 10^-sa) / (ub × 10^-sb) = (ua / ub) × 10^(sb-sa)
-        // Scale the numerator up by max_digits so the quotient carries enough
-        // fractional digits, then trim trailing zeros for an exact result.
-        let extra = max_digits;
-        let num = self.unscaled.mul_pow10(extra + other.scale);
-        let den = other.unscaled.mul_pow10(self.scale);
-        let (q, r) = num.divmod_trunc(&den)?;
-        let mut out = Decimal { unscaled: q, scale: extra };
-        if r.is_zero() {
+        if self.is_zero() {
+            return Some(Decimal { unscaled: BigInt::zero(), scale: 0 });
+        }
+        let prec = prec.max(1);
+        // value = (ua / ub) × 10^(sb − sa)
+        let n0 = self.unscaled.abs();
+        let d = other.unscaled.abs();
+        let e: i64 = other.scale as i64 - self.scale as i64;
+        let negative = self.unscaled.is_negative() != other.unscaled.is_negative();
+
+        // Scale the numerator until the quotient carries `prec` digits.
+        let mut k: usize = 0;
+        let mut n = n0;
+        let (mut q, mut r) = n.divmod_trunc(&d)?;
+        while q.digits().len() < prec {
+            n = n.mul_pow10(1);
+            k += 1;
+            let (q2, r2) = n.divmod_trunc(&d)?;
+            q = q2;
+            r = r2;
+            if k > 10_000 {
+                break; // safety valve; unreachable for sane inputs
+            }
+        }
+
+        // Round half-even on the discarded remainder.
+        let exact = r.is_zero();
+        if !exact {
+            let twice = r.mul(&BigInt::from_i64(2));
+            let cmp = twice.cmp_to(&d);
+            let round_up = match cmp {
+                std::cmp::Ordering::Greater => true,
+                std::cmp::Ordering::Equal => {
+                    // tie → round to even
+                    let last = q.digits().chars().last().unwrap_or('0');
+                    (last as u8 - b'0') % 2 == 1
+                }
+                std::cmp::Ordering::Less => false,
+            };
+            if round_up {
+                q = q.add(&BigInt::from_i64(1));
+                // rounding may add a digit (९९९ → १०००): drop it again
+                if q.digits().len() > prec {
+                    let (q2, _) = q.divmod_trunc(&BigInt::from_i64(10))?;
+                    q = q2;
+                    k = k.saturating_sub(1);
+                }
+            }
+        }
+
+        if negative {
+            q = q.neg();
+        }
+        // value = q × 10^(e − k)
+        let shift = e - k as i64;
+        let mut out = if shift >= 0 {
+            Decimal { unscaled: q.mul_pow10(shift as usize), scale: 0 }
+        } else {
+            Decimal { unscaled: q, scale: (-shift) as usize }
+        };
+        if exact {
             out.trim_zeros();
         }
         Some(out)
@@ -196,9 +252,18 @@ mod tests {
     fn division_exact_and_rounded() {
         assert_eq!(d("1").div(&d("4"), 28).unwrap().to_plain_string(), "0.25");
         assert_eq!(d("10").div(&d("5"), 28).unwrap().to_plain_string(), "2");
-        let third = d("1").div(&d("3"), 28).unwrap().to_plain_string();
-        assert!(third.starts_with("0.3333333333"));
         assert!(d("1").div(&d("0"), 28).is_none());
+        // 28 SIGNIFICANT digits, half-even — byte-identical to the reference
+        assert_eq!(d("1").div(&d("3"), 28).unwrap().to_plain_string(),
+                   "0.3333333333333333333333333333");
+        assert_eq!(d("275").div(&d("3"), 28).unwrap().to_plain_string(),
+                   "91.66666666666666666666666667");
+        assert_eq!(d("2").div(&d("3"), 28).unwrap().to_plain_string(),
+                   "0.6666666666666666666666666667");
+        assert_eq!(d("-275").div(&d("3"), 28).unwrap().to_plain_string(),
+                   "-91.66666666666666666666666667");
+        assert_eq!(d("0").div(&d("7"), 28).unwrap().to_plain_string(), "0");
+        assert_eq!(d("0.1").div(&d("0.4"), 28).unwrap().to_plain_string(), "0.25");
     }
 
     #[test]
