@@ -1,12 +1,16 @@
-// main.rs — संस्कृता वेगः engine (native Rust). Slice 1: lexer demo.
-// This will grow into a full interpreter passing the conformance suite.
+// main.rs — संस्कृता वेगः engine (native Rust).
+// Slices 1-3: lexer + parser + evaluator. Runs core programs natively.
 //
 // Build:  cargo build --release
 // Test:   cargo test
-// Run:    cargo run -- program.सं        (currently: prints the token stream)
+// Run:    cargo run -- program.सं
+//         cargo run --release -- program.सं     (fast)
 
 mod token;
 mod lexer;
+mod ast;
+mod parser;
+mod interp;
 
 use std::env;
 use std::fs;
@@ -16,7 +20,6 @@ fn main() {
     let args: Vec<String> = env::args().collect();
     if args.len() < 2 {
         eprintln!("प्रयोगः: sanskrita-veg <program.सं>");
-        eprintln!("(वेगः engine — slice 1: lexer. Full interpreter in progress.)");
         process::exit(1);
     }
     let path = &args[1];
@@ -27,17 +30,14 @@ fn main() {
             process::exit(1);
         }
     };
-    // NFC normalization would go here (needs unicode-normalization crate; added
-    // when we wire dependencies — for now inputs are assumed NFC).
-    match lexer::lex(&src) {
-        Ok(toks) => {
-            for t in &toks {
-                println!("{:>4}  {:?}", t.line, t.tok);
-            }
-        }
-        Err(e) => {
-            eprintln!("{}", e);
-            process::exit(1);
-        }
+    if let Err(e) = run(&src) {
+        eprintln!("{}", e);
+        process::exit(1);
     }
+}
+
+fn run(src: &str) -> Result<(), String> {
+    let toks = lexer::lex(src)?;
+    let stmts = parser::Parser::new(toks).program()?;
+    interp::Interp::new().run(&stmts)
 }

@@ -5,15 +5,18 @@ Python. The Python interpreter (`../sanskrita.py`) stays as the **reference
 implementation**; this engine is correct when it produces identical results and
 passes the conformance suite (`../परीक्षा.py`, 51 cases).
 
-## Status: **slice 1 — lexer** (in progress, incremental)
+## Status: **slices 1–3 — it runs programs** (incremental)
 
 Built incrementally so every step is compilable and testable:
 
 - [x] **Slice 1 — lexer**: tokens, Devanagari + ASCII digits, danda, strings,
   comments, roman aliases, keyword/identifier split, mixed-script guard.
-- [ ] Slice 2 — parser (AST for the core subset)
-- [ ] Slice 3 — evaluator (variables, arithmetic, वद, यदि, यावत्)
+- [x] **Slice 2 — parser**: full AST + recursive-descent for the core subset.
+- [x] **Slice 3 — evaluator**: मानय/ध्रुव, assignment, integer arithmetic,
+  comparisons, च/वा/न, यदि/अथ/अन्यथा, यावत्, विरम/अनुवर्त, वद, वाक्यम्,
+  दैर्घ्यम्, प्रकारः, सङ्ख्या. **Runs real programs natively.**
 - [ ] Slice 4 — functions, फलम्, recursion
+- [ ] Slice 5 — exact decimals (the correctness promise)
 - [ ] Slice 5 — exact decimals (the correctness promise), strings-as-values
 - [ ] Slice 6 — lists, maps, classes, प्रयत/दोषे
 - [ ] Slice 7 — kāraka arguments, संस्कृतम् stdlib, conformance parity
