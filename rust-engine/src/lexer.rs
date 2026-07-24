@@ -121,20 +121,26 @@ pub fn lex(src: &str) -> Result<Vec<Token>, String> {
                 out.push(Token::new(Tok::Str(buf), line));
             }
             _ if is_digit(c) => {
-                // overflow-checked: a huge literal must error, never wrap
-                let mut val: i64 = 0;
-                while i < n && is_digit(chars[i]) {
-                    val = match val.checked_mul(10)
-                        .and_then(|v| v.checked_add(digit_val(chars[i]))) {
-                        Some(v) => v,
-                        None => return Err(format!(
-                            "दोषः पङ्क्तौ {} — सङ्ख्या अतिविशाला / integer literal too large",
-                            line)),
-                    };
-                    i += 1;
+                // Collect the digits as typed (converting Devanagari to ASCII)
+                // — no numeric conversion here, so arbitrary size and exact
+                // decimals both stay possible downstream.
+                let mut s = String::new();
+                let mut seen_dot = false;
+                while i < n {
+                    let ch = chars[i];
+                    if is_digit(ch) {
+                        s.push(char::from(b'0' + digit_val(ch) as u8));
+                        i += 1;
+                    } else if ch == '.' && !seen_dot
+                        && i + 1 < n && is_digit(chars[i + 1]) {
+                        seen_dot = true;
+                        s.push('.');
+                        i += 1;
+                    } else {
+                        break;
+                    }
                 }
-                // decimals belong to a later slice; stop at '.' here
-                out.push(Token::new(Tok::Num(val), line));
+                out.push(Token::new(Tok::Num(s), line));
             }
             _ => {
                 // two-char operators
@@ -191,8 +197,30 @@ mod tests {
         let toks = lex("वद(४२)।").unwrap();
         // वद ( ४२ ) ।  EOF
         assert!(matches!(toks[0].tok, Tok::Id(_)));
-        assert_eq!(toks[2].tok, Tok::Num(42));
+        assert_eq!(toks[2].tok, Tok::Num("42".into()));
         assert_eq!(toks[4].tok, Tok::End);
+    }
+
+    #[test]
+    fn decimal_literals() {
+        let toks = lex("वद(०.१ + ३.१४१५९)।").unwrap();
+        assert_eq!(toks[2].tok, Tok::Num("0.1".into()));
+        assert_eq!(toks[4].tok, Tok::Num("3.14159".into()));
+    }
+
+    // a danda right after a number must not be read as a decimal point
+    #[test]
+    fn number_then_danda() {
+        let toks = lex("मानय क = ५।").unwrap();
+        assert_eq!(toks[3].tok, Tok::Num("5".into()));
+        assert_eq!(toks[4].tok, Tok::End);
+    }
+
+    // huge literals are fine now — bignum handles them
+    #[test]
+    fn huge_literal_is_kept_exactly() {
+        let toks = lex("मानय क = ९९९९९९९९९९९९९९९९९९९९९९९९।").unwrap();
+        assert_eq!(toks[3].tok, Tok::Num("999999999999999999999999".into()));
     }
 
     #[test]
@@ -255,9 +283,4 @@ mod tests {
         assert_eq!(a[1].tok, b[1].tok);
     }
 
-    // huge literals must error, never silently wrap
-    #[test]
-    fn integer_literal_overflow_errors() {
-        assert!(lex("मानय क = ९९९९९९९९९९९९९९९९९९९९९९९९।").is_err());
-    }
 }

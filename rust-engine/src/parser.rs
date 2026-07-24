@@ -347,7 +347,7 @@ impl Parser {
         let line = self.line();
         let t = self.advance();
         match t.tok {
-            Tok::Num(v) => Ok(Expr::Int(v)),
+            Tok::Num(s) => Ok(Expr::Num(s)),
             Tok::Str(s) => Ok(Expr::Str(s)),
             Tok::Kw(k) => match k.as_str() {
                 "सत्यम्" => Ok(Expr::Bool(true)),

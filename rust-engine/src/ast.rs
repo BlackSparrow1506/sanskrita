@@ -18,7 +18,9 @@ pub struct Arg {
 
 #[derive(Debug, Clone)]
 pub enum Expr {
-    Int(i64),
+    /// Numeric literal as typed (digits, optional '.') — converted to an exact
+    /// big integer or decimal at evaluation time, never to a float.
+    Num(String),
     Str(String),
     Bool(bool),
     Nil,

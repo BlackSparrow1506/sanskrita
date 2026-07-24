@@ -6,6 +6,8 @@
 // Run:    cargo run --release -- program.सं
 
 mod token;
+mod bigint;
+mod decimal;
 mod err;
 mod nfc;
 mod lexer;

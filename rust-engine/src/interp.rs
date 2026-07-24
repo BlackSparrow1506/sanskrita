@@ -1,13 +1,19 @@
 // interp.rs — tree-walking evaluator (वेगः engine)
-// Slices 1–4: integers, strings, booleans, nil; मानय/ध्रुव, assignment,
-// arithmetic (overflow-checked, Python-compatible floored %), comparisons,
-// च/वा/न, यदि, यावत्, विरम/अनुवर्त, विधि/फलम् with recursion and kāraka
-// arguments, builtins वद/वाक्यम्/दैर्घ्यम्/प्रकारः/सङ्ख्या.
+// Slices 1–5: EXACT numbers (arbitrary-precision integers + exact decimals),
+// strings, booleans, nil; मानय/ध्रुव, assignment, arithmetic (floored %),
+// comparisons, च/वा/न, यदि, यावत्, विरम/अनुवर्त, विधि/फलम् with recursion
+// and kāraka arguments, builtins वद/वाक्यम्/दैर्घ्यम्/प्रकारः/सङ्ख्या.
 
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use crate::ast::{Arg, Expr, Param, Stmt};
+use crate::bigint::BigInt;
+use crate::decimal::Decimal;
+
+/// Fractional precision for inexact division — matches the Python reference's
+/// default decimal context (28 significant digits).
+const DIV_DIGITS: usize = 28;
 
 #[derive(Debug, Clone)]
 pub struct Function {
@@ -18,11 +24,33 @@ pub struct Function {
 
 #[derive(Debug, Clone)]
 pub enum Value {
-    Int(i64),
+    /// पूर्णाङ्कः — arbitrary-precision integer (no overflow, ever)
+    Int(BigInt),
+    /// दशमांशः — exact decimal (०.१ + ०.२ == ०.३)
+    Dec(Decimal),
     Str(String),
     Bool(bool),
     Nil,
     Func(Rc<Function>),
+}
+
+impl Value {
+    pub fn int(v: i64) -> Value {
+        Value::Int(BigInt::from_i64(v))
+    }
+
+    /// Numeric view for arithmetic: integers promote to decimals when mixed.
+    fn as_decimal(&self) -> Option<Decimal> {
+        match self {
+            Value::Int(b) => Some(Decimal::from_bigint(b.clone())),
+            Value::Dec(d) => Some(d.clone()),
+            _ => None,
+        }
+    }
+
+    fn is_number(&self) -> bool {
+        matches!(self, Value::Int(_) | Value::Dec(_))
+    }
 }
 
 // Values compare by content; two functions are equal only if they are the same
@@ -30,7 +58,16 @@ pub enum Value {
 impl PartialEq for Value {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (Value::Int(a), Value::Int(b)) => a == b,
+            // numbers compare by VALUE across kinds: ५ == ५.० is सत्यम्
+            (Value::Int(_), Value::Int(_))
+            | (Value::Int(_), Value::Dec(_))
+            | (Value::Dec(_), Value::Int(_))
+            | (Value::Dec(_), Value::Dec(_)) => {
+                match (self.as_decimal(), other.as_decimal()) {
+                    (Some(a), Some(b)) => a.eq_value(&b),
+                    _ => false,
+                }
+            }
             (Value::Str(a), Value::Str(b)) => a == b,
             (Value::Bool(a), Value::Bool(b)) => a == b,
             (Value::Nil, Value::Nil) => true,
@@ -86,28 +123,13 @@ pub const DEFAULT_MAX_DEPTH: usize = 100_000;
 /// The binary raises this — see main.rs (256 MB stack, 192 MB budget).
 pub const DEFAULT_STACK_BUDGET: usize = 1024 * 1024;
 
-fn dev_num(mut x: i64) -> String {
-    let digits = ['०', '१', '२', '३', '४', '५', '६', '७', '८', '९'];
-    if x == 0 {
-        return "०".to_string();
-    }
-    let neg = x < 0;
-    let mut s = String::new();
-    // handle i64::MIN safely by working with the absolute value in i128
-    let mut v: i128 = x as i128;
-    if neg {
-        v = -v;
-    }
-    x = 0;
-    let _ = x;
-    while v > 0 {
-        s.insert(0, digits[(v % 10) as usize]);
-        v /= 10;
-    }
-    if neg {
-        s.insert(0, '-');
-    }
-    s
+/// Render an ASCII numeric string with Devanagari digits (matches the
+/// reference's to_dev_digits, and never uses scientific notation).
+fn dev_digits(ascii: &str) -> String {
+    let d = ['०', '१', '२', '३', '४', '५', '६', '७', '८', '९'];
+    ascii.chars()
+        .map(|c| if c.is_ascii_digit() { d[(c as u8 - b'0') as usize] } else { c })
+        .collect()
 }
 
 impl Interp {
@@ -274,7 +296,15 @@ impl Interp {
 
     fn eval(&mut self, e: &Expr) -> RResult<Value> {
         match e {
-            Expr::Int(v) => Ok(Value::Int(*v)),
+            Expr::Num(s) => {
+                if s.contains('.') {
+                    Decimal::parse(s).map(Value::Dec).ok_or_else(|| {
+                        format!("दोषः — अशुद्धा सङ्ख्या '{}' / malformed number", s)
+                    })
+                } else {
+                    Ok(Value::Int(BigInt::from_digits(s)))
+                }
+            }
             Expr::Str(s) => Ok(Value::Str(s.clone())),
             Expr::Bool(b) => Ok(Value::Bool(*b)),
             Expr::Nil => Ok(Value::Nil),
@@ -288,9 +318,8 @@ impl Interp {
                 let v = self.eval(sub)?;
                 match op.as_str() {
                     "-" => match v {
-                        Value::Int(n) => n.checked_neg().map(Value::Int).ok_or_else(|| {
-                            format!("दोषः पङ्क्तौ {} — सङ्ख्या अतिविशाला / integer overflow", line)
-                        }),
+                        Value::Int(n) => Ok(Value::Int(n.neg())),
+                        Value::Dec(d) => Ok(Value::Dec(d.neg())),
                         _ => Err(format!(
                             "दोषः पङ्क्तौ {} — सङ्ख्या अपेक्षिता\nError at line {} — expected a number",
                             line, line)),
@@ -332,21 +361,27 @@ impl Interp {
                     "==" => Ok(Value::Bool(lv == rv)),
                     "!=" => Ok(Value::Bool(lv != rv)),
                     "<" | ">" | "<=" | ">=" => self.compare(op, &lv, &rv, *line),
-                    "+" => match (&lv, &rv) {
-                        (Value::Int(a), Value::Int(b)) => a.checked_add(*b).map(Value::Int)
-                            .ok_or_else(|| format!(
-                                "दोषः पङ्क्तौ {} — सङ्ख्या अतिविशाला / integer overflow", line)),
-                        (Value::Str(a), Value::Str(b)) => Ok(Value::Str(format!("{}{}", a, b))),
-                        _ => Err(format!(
-                            "दोषः पङ्क्तौ {} — वाक्यं सङ्ख्या च न मिश्रणीये — 'वाक्यम्()' प्रयुज्यताम्\n\
-                             Error at line {} — cannot mix text and number", line, line)),
-                    },
-                    "-" | "*" | "%" | "/" => match (&lv, &rv) {
-                        (Value::Int(a), Value::Int(b)) => self.int_arith(op, *a, *b, *line),
-                        _ => Err(format!(
-                            "दोषः पङ्क्तौ {} — सङ्ख्ये अपेक्षिते\nError at line {} — expected numbers",
-                            line, line)),
-                    },
+                    "+" if matches!((&lv, &rv), (Value::Str(_), Value::Str(_))) => {
+                        match (&lv, &rv) {
+                            (Value::Str(a), Value::Str(b)) => Ok(Value::Str(format!("{}{}", a, b))),
+                            _ => unreachable!(),
+                        }
+                    }
+                    "+" | "-" | "*" | "%" | "/" => {
+                        if !lv.is_number() || !rv.is_number() {
+                            let mixed = matches!(&lv, Value::Str(_)) || matches!(&rv, Value::Str(_));
+                            return Err(if mixed {
+                                format!(
+                                    "दोषः पङ्क्तौ {} — वाक्यं सङ्ख्या च न मिश्रणीये — 'वाक्यम्()' प्रयुज्यताम्\n\
+                                     Error at line {} — cannot mix text and number", line, line)
+                            } else {
+                                format!(
+                                    "दोषः पङ्क्तौ {} — सङ्ख्ये अपेक्षिते\n\
+                                     Error at line {} — expected numbers", line, line)
+                            });
+                        }
+                        self.num_arith(op, &lv, &rv, *line)
+                    }
                     _ => Err("आन्तरिकदोषः / internal error".into()),
                 }
             }
@@ -354,51 +389,87 @@ impl Interp {
         }
     }
 
-    // All integer arithmetic is overflow-CHECKED (see AUDIT.md #2) and '%'
-    // follows Python's floored semantics (#3).
-    fn int_arith(&self, op: &str, a: i64, b: i64, line: usize) -> RResult<Value> {
-        let overflow = || format!(
-            "दोषः पङ्क्तौ {} — सङ्ख्या अतिविशाला (पूर्णाङ्क-सीमातिक्रमः)\n\
-             Error at line {} — integer overflow", line, line);
-        match op {
-            "-" => a.checked_sub(b).map(Value::Int).ok_or_else(overflow),
-            "*" => a.checked_mul(b).map(Value::Int).ok_or_else(overflow),
+    /// Exact numeric arithmetic. Integer op integer stays an arbitrary-precision
+    /// integer; anything involving a decimal produces an exact decimal; '/'
+    /// yields an exact result when it divides evenly (in either kind), else a
+    /// decimal carrying DIV_DIGITS fractional digits — matching the reference.
+    fn num_arith(&self, op: &str, lv: &Value, rv: &Value, line: usize) -> RResult<Value> {
+        let div_zero = || format!(
+            "दोषः पङ्क्तौ {} — शून्येन भागो न शक्यः\n\
+             Error at line {} — division by zero", line, line);
+
+        // both whole numbers → exact integer path (no overflow, ever)
+        if let (Value::Int(a), Value::Int(b)) = (lv, rv) {
+            return match op {
+                "+" => Ok(Value::Int(a.add(b))),
+                "-" => Ok(Value::Int(a.sub(b))),
+                "*" => Ok(Value::Int(a.mul(b))),
+                "%" => a.rem_floor(b).map(Value::Int).ok_or_else(div_zero),
+                "/" => {
+                    if b.is_zero() {
+                        return Err(div_zero());
+                    }
+                    let (q, r) = a.divmod_trunc(b).ok_or_else(div_zero)?;
+                    if r.is_zero() {
+                        Ok(Value::Int(q))           // exact: १० / ५ → २
+                    } else {
+                        let d = Decimal::from_bigint(a.clone())
+                            .div(&Decimal::from_bigint(b.clone()), DIV_DIGITS)
+                            .ok_or_else(div_zero)?;
+                        Ok(Value::Dec(d))           // १ / ४ → ०.२५
+                    }
+                }
+                _ => Err("आन्तरिकदोषः / internal error".into()),
+            };
+        }
+
+        // at least one decimal → exact decimal path
+        let a = lv.as_decimal().ok_or_else(|| format!(
+            "दोषः पङ्क्तौ {} — सङ्ख्ये अपेक्षिते\nError at line {} — expected numbers",
+            line, line))?;
+        let b = rv.as_decimal().ok_or_else(|| format!(
+            "दोषः पङ्क्तौ {} — सङ्ख्ये अपेक्षिते\nError at line {} — expected numbers",
+            line, line))?;
+        let out = match op {
+            "+" => a.add(&b),
+            "-" => a.sub(&b),
+            "*" => a.mul(&b),
+            "/" => a.div(&b, DIV_DIGITS).ok_or_else(div_zero)?,
             "%" => {
-                if b == 0 {
-                    return Err(format!(
-                        "दोषः पङ्क्तौ {} — शून्येन भागो न शक्यः\n\
-                         Error at line {} — division by zero", line, line));
+                // decimal modulo: follow the reference's floored semantics
+                if b.is_zero() {
+                    return Err(div_zero());
                 }
-                let r = a.checked_rem(b).ok_or_else(overflow)?;
-                let r = if (r != 0) && ((r < 0) != (b < 0)) { r + b } else { r };
-                Ok(Value::Int(r))
+                let q = a.div(&b, 0).ok_or_else(div_zero)?;
+                let floor_q = match q.to_bigint_if_integral() {
+                    Some(i) => Decimal::from_bigint(i),
+                    None => q,
+                };
+                a.sub(&floor_q.mul(&b))
             }
-            "/" => {
-                if b == 0 {
-                    return Err(format!(
-                        "दोषः पङ्क्तौ {} — शून्येन भागो न शक्यः\n\
-                         Error at line {} — division by zero", line, line));
-                }
-                if a % b == 0 {
-                    a.checked_div(b).map(Value::Int).ok_or_else(overflow)
-                } else {
-                    Err(format!(
-                        "दोषः पङ्क्तौ {} — दशमांश-विभागः अग्रिमे स्लाइसे\n\
-                         Error at line {} — decimal '/' not yet in the veg engine",
-                        line, line))
-                }
-            }
-            _ => Err("आन्तरिकदोषः / internal error".into()),
+            _ => return Err("आन्तरिकदोषः / internal error".into()),
+        };
+        // an exact whole result stays a whole number (५.० + ५.० → १०)
+        match out.to_bigint_if_integral() {
+            Some(i) if out.is_integer() => Ok(Value::Int(i)),
+            _ => Ok(Value::Dec(out)),
         }
     }
 
     fn compare(&self, op: &str, a: &Value, b: &Value, line: usize) -> RResult<Value> {
-        let ord = match (a, b) {
-            (Value::Int(x), Value::Int(y)) => x.partial_cmp(y),
-            (Value::Str(x), Value::Str(y)) => x.partial_cmp(y),
-            _ => return Err(format!(
-                "दोषः पङ्क्तौ {} — तुलना समानप्रकारयोः एव\n\
-                 Error at line {} — can only compare two numbers or two texts", line, line)),
+        let ord = if a.is_number() && b.is_number() {
+            match (a.as_decimal(), b.as_decimal()) {
+                (Some(x), Some(y)) => Some(x.cmp_to(&y)),
+                _ => None,
+            }
+        } else {
+            match (a, b) {
+                (Value::Str(x), Value::Str(y)) => x.partial_cmp(y),
+                _ => return Err(format!(
+                    "दोषः पङ्क्तौ {} — तुलना समानप्रकारयोः एव\n\
+                     Error at line {} — can only compare two numbers or two texts",
+                    line, line)),
+            }
         };
         use std::cmp::Ordering::*;
         let r = matches!(
@@ -412,7 +483,8 @@ impl Interp {
 
     fn display(&self, v: &Value) -> String {
         match v {
-            Value::Int(n) => dev_num(*n),
+            Value::Int(n) => dev_digits(&n.to_string_signed()),
+            Value::Dec(d) => dev_digits(&d.to_plain_string()),
             Value::Str(s) => s.clone(),
             Value::Bool(b) => if *b { "सत्यम्".into() } else { "असत्यम्".into() },
             Value::Nil => "शून्यम्".into(),
@@ -533,7 +605,8 @@ impl Interp {
                 Ok(Value::Str(self.display(&vals[0])))
             }
             "दैर्घ्यम्" => match vals.first() {
-                Some(Value::Str(s)) if vals.len() == 1 => Ok(Value::Int(s.chars().count() as i64)),
+                Some(Value::Str(s)) if vals.len() == 1 =>
+                    Ok(Value::int(s.chars().count() as i64)),
                 _ => Err(format!(
                     "दोषः पङ्क्तौ {} — दैर्घ्यम्() वाक्यम् एकं गृह्णाति\n\
                      Error at line {} — दैर्घ्यम्() takes one text value", line, line)),
@@ -546,6 +619,7 @@ impl Interp {
                 }
                 let t = match &vals[0] {
                     Value::Int(_) => "पूर्णाङ्कः",
+                    Value::Dec(_) => "दशमांशः",
                     Value::Str(_) => "वाक्यम्",
                     Value::Bool(_) => "सत्यासत्यम्",
                     Value::Nil => "शून्यम्",
@@ -559,9 +633,23 @@ impl Interp {
                         '०'..='९' => char::from(b'0' + (c as u32 - '०' as u32) as u8),
                         other => other,
                     }).collect();
-                    ascii.parse::<i64>().map(Value::Int).map_err(|_| format!(
+                    let bad = || format!(
                         "दोषः पङ्क्तौ {} — '{}' सङ्ख्या न\n\
-                         Error at line {} — '{}' is not a number", line, s, line, s))
+                         Error at line {} — '{}' is not a number", line, s, line, s);
+                    let body = ascii.strip_prefix('-').unwrap_or(&ascii);
+                    if body.is_empty() || !body.chars().all(|c| c.is_ascii_digit() || c == '.') {
+                        return Err(bad());
+                    }
+                    if ascii.contains('.') {
+                        Decimal::parse(&ascii).map(Value::Dec).ok_or_else(bad)
+                    } else {
+                        let neg = ascii.starts_with('-');
+                        let mut b = BigInt::from_digits(body);
+                        if neg {
+                            b = b.neg();
+                        }
+                        Ok(Value::Int(b))
+                    }
                 }
                 _ => Err(format!(
                     "दोषः पङ्क्तौ {} — सङ्ख्या() वाक्यम् एकं गृह्णाति\n\
@@ -594,11 +682,85 @@ mod tests {
         it.scopes[0].vars.get("प").cloned().unwrap()
     }
 
+    /// Rendered form of `प` — the clearest way to assert on exact numbers.
+    fn shown(src: &str) -> String {
+        let toks = lex(src).unwrap();
+        let stmts = Parser::new(toks).program().unwrap();
+        let mut it = Interp::new();
+        it.run(&stmts).unwrap();
+        let v = it.scopes[0].vars.get("प").cloned().unwrap();
+        it.display(&v)
+    }
+
     #[test]
     fn arithmetic() {
-        assert_eq!(eval_expr("मानय प = २ + ३ * ४।"), Value::Int(14));
-        assert_eq!(eval_expr("मानय प = (२ + ३) * ४।"), Value::Int(20));
-        assert_eq!(eval_expr("मानय प = १० % ३।"), Value::Int(1));
+        assert_eq!(eval_expr("मानय प = २ + ३ * ४।"), Value::int(14));
+        assert_eq!(eval_expr("मानय प = (२ + ३) * ४।"), Value::int(20));
+        assert_eq!(eval_expr("मानय प = १० % ३।"), Value::int(1));
+    }
+
+    // ---- slice 5: exactness, the language's core promise ----
+
+    #[test]
+    fn point_one_plus_point_two_is_point_three() {
+        assert_eq!(shown("मानय प = ०.१ + ०.२।"), "०.३");
+        assert_eq!(eval_expr("मानय प = ०.१ + ०.२ == ०.३।"), Value::Bool(true));
+    }
+
+    #[test]
+    fn decimals_print_plainly() {
+        assert_eq!(shown("मानय प = ३.१४१५९।"), "३.१४१५९");
+        assert_eq!(shown("मानय प = ०.००१ * ०.००१।"), "०.०००००१");
+        assert_eq!(shown("मानय प = ०-२.५।"), "-२.५");
+    }
+
+    #[test]
+    fn money_math_is_exact() {
+        // ₹450.50 + ₹320.25 + ₹599.00 — the व्ययगणकः example's core
+        assert_eq!(shown("मानय प = ४५०.५० + ३२०.२५ + ५९९.००।"), "१३६९.७५");
+    }
+
+    #[test]
+    fn integers_are_arbitrary_precision() {
+        // 25! overflows i64 — must be exact here
+        assert_eq!(
+            shown("विधि फ(म) { यदि (म <= १) { फलम् १। } फलम् म * फ(म - १)। } \
+                   मानय प = फ(२५)।"),
+            dev_digits("15511210043330985984000000"));
+        // and beyond i64 by literal, too
+        assert_eq!(
+            shown("मानय प = ९२२३३७२०३६८५४७७५८०७ + १।"),
+            dev_digits("9223372036854775808"));
+    }
+
+    #[test]
+    fn division_exact_or_decimal() {
+        assert_eq!(shown("मानय प = १० / ५।"), "२");          // stays whole
+        assert_eq!(shown("मानय प = १ / ४।"), "०.२५");         // exact decimal
+        assert!(shown("मानय प = १ / ३।").starts_with("०.३३३३"));
+    }
+
+    #[test]
+    fn mixed_int_decimal_arithmetic() {
+        assert_eq!(shown("मानय प = २ + ०.५।"), "२.५");
+        assert_eq!(shown("मानय प = ५.० + ५.०।"), "१०");      // exact whole result
+        assert_eq!(eval_expr("मानय प = ५ == ५.०।"), Value::Bool(true));
+    }
+
+    #[test]
+    fn decimal_comparison_and_type() {
+        assert_eq!(eval_expr("मानय प = ०.३० == ०.३।"), Value::Bool(true));
+        assert_eq!(eval_expr("मानय प = ०.१ < ०.२।"), Value::Bool(true));
+        assert_eq!(shown("मानय प = प्रकारः(०.५)।"), "दशमांशः");
+        assert_eq!(shown("मानय प = प्रकारः(५)।"), "पूर्णाङ्कः");
+        assert_eq!(shown("मानय प = प्रकारः(१० / ५)।"), "पूर्णाङ्कः");
+    }
+
+    #[test]
+    fn to_number_handles_decimals_and_bignums() {
+        assert_eq!(shown("मानय प = सङ्ख्या(\"४.५\") + ०.५।"), "५");
+        assert_eq!(shown("मानय प = सङ्ख्या(\"९९९९९९९९९९९९९९९९९९९९\") + १।"),
+                   dev_digits("100000000000000000000"));
     }
 
     #[test]
@@ -611,14 +773,14 @@ mod tests {
     fn loop_sum() {
         assert_eq!(
             eval_expr("मानय प = ०। मानय इ = १। यावत् (इ <= १००) { प = प + इ। इ = इ + १। }"),
-            Value::Int(5050));
+            Value::int(5050));
     }
 
     #[test]
     fn if_else() {
         assert_eq!(
             eval_expr("मानय प = ०। यदि (५ > ३) { प = १। } अन्यथा { प = २। }"),
-            Value::Int(1));
+            Value::int(1));
     }
 
     #[test]
@@ -633,8 +795,8 @@ mod tests {
 
     #[test]
     fn modulo_matches_python_semantics() {
-        assert_eq!(eval_expr("मानय प = ०-७। प = प % ३।"), Value::Int(2));
-        assert_eq!(eval_expr("मानय प = ७ % ३।"), Value::Int(1));
+        assert_eq!(eval_expr("मानय प = ०-७। प = प % ३।"), Value::int(2));
+        assert_eq!(eval_expr("मानय प = ७ % ३।"), Value::int(1));
     }
 
     #[test]
@@ -658,7 +820,7 @@ mod tests {
             eval_expr("मानय प = ०। मानय इ = ०। यावत् (सत्यम्) { इ = इ + १। \
                        यदि (इ % २ == ०) { अनुवर्त। } प = प + इ। \
                        यदि (इ >= ९) { विरम। } }"),
-            Value::Int(25));
+            Value::int(25));
     }
 
     // ---- slice 4: functions ----
@@ -667,7 +829,7 @@ mod tests {
     fn simple_function() {
         assert_eq!(
             eval_expr("विधि योग(क, ख) { फलम् क + ख। } मानय प = योग(२, ३)।"),
-            Value::Int(5));
+            Value::int(5));
     }
 
     #[test]
@@ -675,7 +837,7 @@ mod tests {
         assert_eq!(
             eval_expr("विधि फ(म) { यदि (म <= १) { फलम् १। } फलम् म * फ(म - १)। } \
                        मानय प = फ(५)।"),
-            Value::Int(120));
+            Value::int(120));
     }
 
     #[test]
@@ -683,7 +845,7 @@ mod tests {
         assert_eq!(
             eval_expr("विधि फिब(म) { यदि (म <= १) { फलम् म। } \
                        फलम् फिब(म - १) + फिब(म - २)। } मानय प = फिब(१०)।"),
-            Value::Int(55));
+            Value::int(55));
     }
 
     #[test]
@@ -722,7 +884,7 @@ mod tests {
     fn function_sees_globals() {
         assert_eq!(
             eval_expr("मानय ग = १०। विधि फ() { फलम् ग + १। } मानय प = फ()।"),
-            Value::Int(11));
+            Value::int(11));
     }
 
     #[test]
@@ -735,7 +897,7 @@ mod tests {
         assert_eq!(
             eval_expr("विधि फ() { मानय इ = ०। यावत् (सत्यम्) { इ = इ + १। \
                        यदि (इ == ४) { फलम् इ। } } } मानय प = फ()।"),
-            Value::Int(4));
+            Value::int(4));
     }
 
     // Runaway recursion must produce a clean error, never a process crash.

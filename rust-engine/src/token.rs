@@ -2,7 +2,10 @@
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Tok {
-    Num(i64),        // whole-number literal (subset: integers first; decimals later)
+    /// Numeric literal, kept as the DIGITS the user typed (ASCII, with an
+    /// optional '.'), so the value layer can build an exact big integer or
+    /// decimal. Never parsed into a float.
+    Num(String),
     Str(String),     // "…"
     Kw(String),      // keyword (canonical Devanagari)
     Id(String),      // identifier
