@@ -769,10 +769,15 @@ mod tests {
                 let toks = lex(src).unwrap();
                 let stmts = Parser::new(toks).program().unwrap();
                 let mut it = Interp::new().with_limits(1_000_000, 4 * 1024 * 1024);
-                it.run(&stmts).map(|_| it.scopes[0].vars.get("प").cloned())
+                it.run(&stmts)?;
+                // extract a plain i64 here — Value holds an Rc and is not Send
+                match it.scopes[0].vars.get("प") {
+                    Some(Value::Int(n)) => Ok(*n),
+                    other => Err(format!("unexpected value: {:?}", other)),
+                }
             })
             .unwrap();
-        let v = handle.join().unwrap().unwrap();
-        assert_eq!(v, Some(Value::Int(200)));
+        let n: Result<i64, String> = handle.join().expect("thread must not crash");
+        assert_eq!(n.unwrap(), 200);
     }
 }
