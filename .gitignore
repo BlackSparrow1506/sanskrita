@@ -11,3 +11,6 @@ video/*.mp3
 video/*.aiff
 video/*.wav
 video/voice_used.txt
+
+# rust build artifacts
+rust-engine/target/
