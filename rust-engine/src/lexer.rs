@@ -224,9 +224,10 @@ mod tests {
 
     #[test]
     fn danda_after_keyword() {
+        // मानय(0) प(1) =(2) सत्यम्(3) ।(4) EOF(5)
         let toks = lex("मानय प = सत्यम्।").unwrap();
-        assert_eq!(toks[4].tok, Tok::Kw("सत्यम्".into()));  // not Id("सत्यम्।")
-        assert_eq!(toks[5].tok, Tok::End);
+        assert_eq!(toks[3].tok, Tok::Kw("सत्यम्".into()));  // not Id("सत्यम्।")
+        assert_eq!(toks[4].tok, Tok::End);
     }
 
     // identifiers may contain Devanagari digits and matras
