@@ -26,7 +26,9 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// works, and anything runaway still gets a clean bilingual error instead of
 /// a crash. (CPython and rustc use the same technique.)
 const STACK_BYTES: usize = 256 * 1024 * 1024;
-const RUN_MAX_DEPTH: usize = 20_000;
+const RUN_MAX_DEPTH: usize = 1_000_000;
+/// Budget is kept well below STACK_BYTES so the guard always fires first.
+const RUN_STACK_BUDGET: usize = 192 * 1024 * 1024;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -71,6 +73,6 @@ fn run(src: &str) -> Result<(), String> {
     let toks = lexer::lex(src)?;
     let stmts = parser::Parser::new(toks).program()?;
     interp::Interp::new()
-        .with_max_depth(RUN_MAX_DEPTH)
+        .with_limits(RUN_MAX_DEPTH, RUN_STACK_BUDGET)
         .run(&stmts)
 }

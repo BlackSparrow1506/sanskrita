@@ -67,17 +67,24 @@ pub struct Interp {
     current: usize,
     depth: usize,
     max_depth: usize,
+    /// Address of a local in the frame where this interpreter was created.
+    /// Stacks grow downward, so (anchor − current address) ≈ bytes of stack
+    /// consumed. Measuring beats guessing frame sizes, which vary wildly
+    /// between debug and release builds.
+    anchor: usize,
+    stack_budget: usize,
 }
 
 type RResult<T> = Result<T, String>;
 
-/// Recursion limit for the DEFAULT stack (~2 MB on a spawned thread, which is
-/// what `cargo test` gives us). Each संस्कृता call consumes several native
-/// frames (call → exec_block → exec → eval → call), and debug builds use far
-/// more stack per frame than release, so this is deliberately conservative:
-/// the guard must fire *before* the stack runs out, on every build profile.
-/// The binary raises it — see main.rs, which runs on a 256 MB stack.
-pub const DEFAULT_MAX_DEPTH: usize = 400;
+/// A depth cap is a *secondary* guard; the primary one is the measured stack
+/// budget below. This value is high because it should rarely be what fires.
+pub const DEFAULT_MAX_DEPTH: usize = 100_000;
+
+/// Default stack budget: 1 MB, safe inside the ~2 MB stack that `cargo test`
+/// gives a spawned test thread, on debug builds where frames are largest.
+/// The binary raises this — see main.rs (256 MB stack, 192 MB budget).
+pub const DEFAULT_STACK_BUDGET: usize = 1024 * 1024;
 
 fn dev_num(mut x: i64) -> String {
     let digits = ['०', '१', '२', '३', '४', '५', '६', '७', '८', '९'];
@@ -105,19 +112,31 @@ fn dev_num(mut x: i64) -> String {
 
 impl Interp {
     pub fn new() -> Self {
+        let probe = 0u8;
         Interp {
             scopes: vec![Scope::new(None)],
             current: 0,
             depth: 0,
             max_depth: DEFAULT_MAX_DEPTH,
+            anchor: &probe as *const u8 as usize,
+            stack_budget: DEFAULT_STACK_BUDGET,
         }
     }
 
-    /// Raise the recursion limit — only safe when the caller has arranged a
+    /// Raise the limits — only safe when the caller has arranged a
     /// correspondingly large stack (see main.rs).
-    pub fn with_max_depth(mut self, n: usize) -> Self {
-        self.max_depth = n;
+    pub fn with_limits(mut self, max_depth: usize, stack_budget: usize) -> Self {
+        self.max_depth = max_depth;
+        self.stack_budget = stack_budget;
         self
+    }
+
+    /// Approximate bytes of stack consumed since the interpreter was created.
+    #[inline]
+    fn stack_used(&self) -> usize {
+        let probe = 0u8;
+        let here = &probe as *const u8 as usize;
+        self.anchor.saturating_sub(here)   // stacks grow downward
     }
 
     // ---- scope helpers ----
@@ -422,10 +441,12 @@ impl Interp {
     }
 
     fn call_function(&mut self, f: &Rc<Function>, args: &[Arg], line: usize) -> RResult<Value> {
-        if self.depth >= self.max_depth {
+        // Primary guard: measured stack use. Secondary: call depth. Either
+        // firing gives a clean bilingual error instead of a process crash.
+        if self.stack_used() > self.stack_budget || self.depth >= self.max_depth {
             return Err(format!(
-                "दोषः पङ्क्तौ {} — अतिगभीरा पुनरावृत्तिः\n\
-                 Error at line {} — recursion too deep", line, line));
+                "दोषः पङ्क्तौ {} — अतिगभीरा पुनरावृत्तिः (स्मृति-सीमा)\n\
+                 Error at line {} — recursion too deep (stack limit)", line, line));
         }
         // evaluate arguments in the CALLER's scope
         let mut positional: Vec<Value> = Vec::new();
@@ -717,9 +738,41 @@ mod tests {
             Value::Int(4));
     }
 
+    // Runaway recursion must produce a clean error, never a process crash.
+    // Run it inside a thread with a KNOWN stack and a budget set well below,
+    // so the test is deterministic on every build profile and platform.
     #[test]
     fn deep_recursion_errors_not_crashes() {
-        // must produce a clean error, never a stack-overflow crash
-        assert!(run_ok("विधि फ(म) { फलम् फ(म + १)। } वद(फ(१))।").is_err());
+        let handle = std::thread::Builder::new()
+            .stack_size(8 * 1024 * 1024)
+            .spawn(|| {
+                let src = "विधि फ(म) { फलम् फ(म + १)। } वद(फ(१))।";
+                let toks = lex(src).unwrap();
+                let stmts = Parser::new(toks).program().unwrap();
+                Interp::new()
+                    .with_limits(1_000_000, 2 * 1024 * 1024)   // 2 MB of 8 MB
+                    .run(&stmts)
+            })
+            .unwrap();
+        let result = handle.join().expect("interpreter thread must not crash");
+        assert!(result.is_err(), "runaway recursion must error, not succeed");
+    }
+
+    // A legitimately deep (but bounded) recursion must still work.
+    #[test]
+    fn moderate_recursion_works() {
+        let handle = std::thread::Builder::new()
+            .stack_size(8 * 1024 * 1024)
+            .spawn(|| {
+                let src = "विधि गण(म) { यदि (म <= ०) { फलम् ०। } फलम् १ + गण(म - १)। } \
+                           मानय प = गण(२००)।";
+                let toks = lex(src).unwrap();
+                let stmts = Parser::new(toks).program().unwrap();
+                let mut it = Interp::new().with_limits(1_000_000, 4 * 1024 * 1024);
+                it.run(&stmts).map(|_| it.scopes[0].vars.get("प").cloned())
+            })
+            .unwrap();
+        let v = handle.join().unwrap().unwrap();
+        assert_eq!(v, Some(Value::Int(200)));
     }
 }
