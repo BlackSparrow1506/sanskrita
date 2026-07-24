@@ -19,6 +19,22 @@ Compiled-run times are dominated by ~0.15 ms process startup — the
 computation itself is smaller still. Subset only (ints, loops, functions);
 this is the §7b यन्त्रसङ्कलकः mode proven early, not a release feature.
 
+## वेगः — native Rust engine (Phase 3c, in progress)
+
+Measured on Apple Silicon MacBook, `cargo build --release`, slices 1–3
+(lexer + parser + naive tree-walking evaluator, no optimization passes yet):
+
+| Workload | Python engine | वेगः (Rust) | gain |
+|---|---|---|---|
+| loop sum 1..50,000 | ~106 ms | **~20 ms** | ~5× |
+
+Same program, same answer (१२५००२५०००). This is the first measured evidence
+for the blueprint's speed promise — and it is the *slowest* the Rust engine will
+ever be, since no optimization work has been done. Subset so far: integers,
+variables, arithmetic, comparisons, logic, यदि, यावत्, वद. Decimals, functions,
+collections and the stdlib arrive in later slices; the 51-case conformance suite
+(`परीक्षा.py`) is the completion criterion.
+
 **Honest reading:** the current engine is a tree-walking interpreter written in
 Python, so it pays Python's cost *plus* interpretation overhead — the ratio
 column is the price of Phase 2 convenience. The Phase 3 Rust engine exists

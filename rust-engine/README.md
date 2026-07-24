@@ -21,6 +21,19 @@ Built incrementally so every step is compilable and testable:
 - [ ] Slice 6 — lists, maps, classes, प्रयत/दोषे
 - [ ] Slice 7 — kāraka arguments, संस्कृतम् stdlib, conformance parity
 
+## First measured result (MacBook, 2026-07-12)
+
+Loop sum 1..50,000 — `मानय स = ०। मानय इ = १। यावत् (इ <= ५००००) {…}`
+
+| Engine | time |
+|---|---|
+| Python interpreter (`sanskrita.py`) | ~106 ms |
+| **वेगः (Rust, release, naive tree-walker)** | **~20 ms (user)** |
+
+~5× faster with zero optimization work — the first real evidence for the
+blueprint's speed promise. Correct answer (१२५००२५०००) verified against the
+Python engine. Expect further gains from slice 5+ and later optimization.
+
 ## Build & test
 
 Requires Rust (install from https://rustup.rs):
