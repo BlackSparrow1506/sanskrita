@@ -234,7 +234,7 @@ mod tests {
     fn roman_aliases() {
         let toks = lex("manay k = 5|").unwrap();
         assert_eq!(toks[0].tok, Tok::Kw("मानय".into()));
-        assert_eq!(toks[3].tok, Tok::Num(5));
+        assert_eq!(toks[3].tok, Tok::Num("5".into()));
         assert_eq!(toks[4].tok, Tok::End);
     }
 

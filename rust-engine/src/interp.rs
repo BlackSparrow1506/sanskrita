@@ -932,14 +932,14 @@ mod tests {
                 let stmts = Parser::new(toks).program().unwrap();
                 let mut it = Interp::new().with_limits(1_000_000, 4 * 1024 * 1024);
                 it.run(&stmts)?;
-                // extract a plain i64 here — Value holds an Rc and is not Send
+                // extract a plain String here — Value holds an Rc and is not Send
                 match it.scopes[0].vars.get("प") {
-                    Some(Value::Int(n)) => Ok(*n),
+                    Some(Value::Int(n)) => Ok(n.to_string_signed()),
                     other => Err(format!("unexpected value: {:?}", other)),
                 }
             })
             .unwrap();
-        let n: Result<i64, String> = handle.join().expect("thread must not crash");
-        assert_eq!(n.unwrap(), 200);
+        let n: Result<String, String> = handle.join().expect("thread must not crash");
+        assert_eq!(n.unwrap(), "200");
     }
 }
