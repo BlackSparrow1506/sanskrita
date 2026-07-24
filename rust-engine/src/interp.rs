@@ -860,6 +860,9 @@ impl Interp {
                 }).collect();
                 format!("{{{}}}", parts.join(", "))
             }
+            Value::Module(m) => format!("<कोष्ठकम् {}>", m),
+            Value::UserModule(_, name) => format!("<कोष्ठकम् {}>", name),
+            Value::Native(m, f) => format!("<विधिः {}.{}>", m, f),
         }
     }
 

@@ -52,7 +52,9 @@ fn is_matra(c: char) -> bool {
     MATRAS.iter().any(|(k, _)| *k == c)
 }
 
-fn look(table: &[(char, &str)], c: char) -> Option<&'static str> {
+/// Look a character up in one of the &'static tables above. The explicit
+/// 'static on the slice is what lets the returned &str outlive the call.
+fn look(table: &[(char, &'static str)], c: char) -> Option<&'static str> {
     table.iter().find(|(k, _)| *k == c).map(|(_, v)| *v)
 }
 
