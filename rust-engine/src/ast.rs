@@ -12,6 +12,8 @@ pub enum Expr {
     Call(String, Vec<Expr>, usize),             // builtin/function name, args
 }
 
+// `line` fields are carried for error reporting in later slices.
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub enum Stmt {
     Let { name: String, expr: Expr, is_const: bool, line: usize },

@@ -50,18 +50,31 @@ fn digit_val(c: char) -> i64 {
     if let Some(d) = dev_digit(c) { d } else { (c as i64) - ('0' as i64) }
 }
 
-// Devanagari block: U+0900..U+097F
+// Devanagari block: U+0900..U+097F — but NOT the dandas (U+0964 ।, U+0965 ॥),
+// which are punctuation (statement terminators), nor the digits U+0966..U+096F,
+// which the number scanner owns. Getting this wrong glues '।' onto identifiers.
+fn is_dev_danda(c: char) -> bool {
+    c == '\u{0964}' || c == '\u{0965}'
+}
+
 fn is_devanagari(c: char) -> bool {
-    ('\u{0900}'..='\u{097F}').contains(&c)
+    ('\u{0900}'..='\u{097F}').contains(&c) && !is_dev_danda(c)
 }
 
 fn is_ident_start(c: char) -> bool {
+    if is_dev_danda(c) || dev_digit(c).is_some() {
+        return false;
+    }
     c == '_' || c.is_alphabetic() || is_devanagari(c)
 }
 
+// identifier continuation also allows combining marks (matras, virama, nukta,
+// anusvara/visarga) and digits — but still never a danda.
 fn is_ident_cont(c: char) -> bool {
-    is_ident_start(c) || c.is_ascii_digit()
-        // combining marks (matras) are part of a Devanagari cluster
+    if is_dev_danda(c) {
+        return false;
+    }
+    is_ident_start(c) || c.is_ascii_digit() || dev_digit(c).is_some()
         || ('\u{0900}'..='\u{097F}').contains(&c)
 }
 
@@ -197,5 +210,29 @@ mod tests {
         let toks = lex("# hi\nवद(\"नमस्ते\")।").unwrap();
         assert_eq!(toks[0].tok, Tok::Id("वद".into()));
         assert_eq!(toks[2].tok, Tok::Str("नमस्ते".into()));
+    }
+
+    // regression: the danda must NEVER be absorbed into an identifier or
+    // keyword, even though U+0964 sits inside the Devanagari Unicode block.
+    #[test]
+    fn danda_not_part_of_identifier() {
+        let toks = lex("क = इ।").unwrap();
+        assert_eq!(toks[0].tok, Tok::Id("क".into()));
+        assert_eq!(toks[2].tok, Tok::Id("इ".into()));   // not "इ।"
+        assert_eq!(toks[3].tok, Tok::End);
+    }
+
+    #[test]
+    fn danda_after_keyword() {
+        let toks = lex("मानय प = सत्यम्।").unwrap();
+        assert_eq!(toks[4].tok, Tok::Kw("सत्यम्".into()));  // not Id("सत्यम्।")
+        assert_eq!(toks[5].tok, Tok::End);
+    }
+
+    // identifiers may contain Devanagari digits and matras
+    #[test]
+    fn identifier_with_matras_and_digits() {
+        let toks = lex("मानय वर्ष२ = ५।").unwrap();
+        assert_eq!(toks[1].tok, Tok::Id("वर्ष२".into()));
     }
 }
