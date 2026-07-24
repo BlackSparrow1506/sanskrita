@@ -1,9 +1,11 @@
-// parser.rs — recursive-descent parser (वेगः engine)
-// Subset: मानय/ध्रुव, assignment, वद & builtin calls, यदि/अथ यदि/अन्यथा,
-// यावत्, विरम/अनुवर्त, arithmetic, comparisons, च/वा/न, literals.
-// (Functions, lists, classes: later slices.)
+// parser.rs — recursive-descent parser (वेगः engine), slices 1–6.
+//
+// Covers: declarations, assignment (name / index / attribute), वद & calls,
+// यदि/अथ यदि/अन्यथा, यावत्, प्रत्येकम्…इति, विरम/अनुवर्त, विधि/फलम् with
+// kāraka parameters, वर्गः with inheritance, सृज, प्रयत/दोषे, list & map
+// literals, indexing, attribute access, and the full expression grammar.
 
-use crate::ast::{Arg, Expr, Param, Stmt};
+use crate::ast::{Arg, Expr, Method, Param, Stmt, Target};
 use crate::token::{Tok, Token};
 
 /// Pāṇini's six kārakas — the only valid argument role labels.
@@ -50,8 +52,20 @@ impl Parser {
             self.advance();
             Ok(())
         } else {
-            Err(format!("दोषः पङ्क्तौ {} — '{}' अपेक्षितम् / expected '{}'",
-                        self.line(), s, s))
+            Err(format!(
+                "दोषः पङ्क्तौ {} — '{}' अपेक्षितम्\nError at line {} — expected '{}'",
+                self.line(), s, self.line(), s))
+        }
+    }
+
+    fn eat_kw(&mut self, s: &str) -> PResult<()> {
+        if self.is_kw(s) {
+            self.advance();
+            Ok(())
+        } else {
+            Err(format!(
+                "दोषः पङ्क्तौ {} — '{}' अपेक्षितम्\nError at line {} — expected '{}'",
+                self.line(), s, self.line(), s))
         }
     }
 
@@ -59,9 +73,16 @@ impl Parser {
         if matches!(self.peek().tok, Tok::End) {
             self.advance();
             Ok(())
+        } else if self.is_op("{") {
+            Err(format!(
+                "दोषः पङ्क्तौ {} — '{{' प्राप्तम् — किं 'यदि' 'यावत्' वा अभिप्रेतम्?\n\
+                 Error at line {} — found '{{' — did you mean यदि (if) or यावत् (while)?",
+                self.line(), self.line()))
         } else {
-            Err(format!("दोषः पङ्क्तौ {} — दण्डः '।' अपेक्षितः / expected danda",
-                        self.line()))
+            Err(format!(
+                "दोषः पङ्क्तौ {} — वाक्यान्ते दण्डः '।' अपेक्षितः\n\
+                 Error at line {} — expected danda '।' at end of statement",
+                self.line(), self.line()))
         }
     }
 
@@ -78,7 +99,9 @@ impl Parser {
         let mut stmts = Vec::new();
         while !self.is_op("}") {
             if matches!(self.peek().tok, Tok::Eof) {
-                return Err(format!("दोषः पङ्क्तौ {} — '}}' अपेक्षितम्", self.line()));
+                return Err(format!(
+                    "दोषः पङ्क्तौ {} — '}}' अपेक्षितम्\nError at line {} — expected '}}'",
+                    self.line(), self.line()));
             }
             stmts.push(self.statement()?);
         }
@@ -88,11 +111,15 @@ impl Parser {
 
     fn statement(&mut self) -> PResult<Stmt> {
         let line = self.line();
-        // declarations
         if self.is_kw("मानय") || self.is_kw("ध्रुव") {
             let is_const = self.is_kw("ध्रुव");
             self.advance();
             let name = self.ident("नाम अपेक्षितम् / expected a name")?;
+            // optional type annotation: `मानय क : पूर्णाङ्कः = ५।`
+            if self.is_op(":") {
+                self.advance();
+                let _ty = self.ident("प्रकारः अपेक्षितः / expected a type name")?;
+            }
             self.eat_op("=")?;
             let expr = self.expression()?;
             self.eat_end()?;
@@ -111,16 +138,7 @@ impl Parser {
         if self.is_kw("विधि") {
             self.advance();
             let name = self.ident("विधिनाम अपेक्षितम् / expected a function name")?;
-            self.eat_op("(")?;
-            let mut params = Vec::new();
-            if !self.is_op(")") {
-                params.push(self.param()?);
-                while self.is_op(",") {
-                    self.advance();
-                    params.push(self.param()?);
-                }
-            }
-            self.eat_op(")")?;
+            let params = self.param_list()?;
             let body = self.block()?;
             return Ok(Stmt::Func { name, params, body, line });
         }
@@ -134,6 +152,27 @@ impl Parser {
             self.eat_end()?;
             return Ok(Stmt::Return { expr, line });
         }
+        if self.is_kw("वर्गः") {
+            return self.class_def();
+        }
+        if self.is_kw("प्रयत") {
+            self.advance();
+            let body = self.block()?;
+            self.eat_kw("दोषे")?;
+            self.eat_op("(")?;
+            let err_name = self.ident("दोषनाम अपेक्षितम् / expected an error variable")?;
+            self.eat_op(")")?;
+            let catch = self.block()?;
+            return Ok(Stmt::Try { body, err_name, catch, line });
+        }
+        if self.is_kw("प्रत्येकम्") {
+            self.advance();
+            let var = self.ident("चरनाम अपेक्षितम् / expected a loop variable")?;
+            self.eat_kw("इति")?;
+            let iter = self.expression()?;
+            let body = self.block()?;
+            return Ok(Stmt::ForEach { var, iter, body, line });
+        }
         if self.is_kw("यदि") {
             return self.if_stmt();
         }
@@ -145,55 +184,69 @@ impl Parser {
             let body = self.block()?;
             return Ok(Stmt::While { cond, body, line });
         }
-        // assignment:  ident = expr ।   (lookahead)
-        if let Tok::Id(name) = &self.peek().tok {
-            let name = name.clone();
-            if matches!(self.toks.get(self.pos + 1).map(|t| &t.tok),
-                        Some(Tok::Op(o)) if o == "=") {
-                self.advance(); // id
-                self.advance(); // =
-                let expr = self.expression()?;
-                self.eat_end()?;
-                return Ok(Stmt::Assign { name, expr, line });
-            }
-        }
-        // bare expression
+        // expression statement — or an assignment if '=' follows
         let e = self.expression()?;
+        if self.is_op("=") {
+            self.advance();
+            let value = self.expression()?;
+            self.eat_end()?;
+            let target = match e {
+                Expr::Var(n, _) => Target::Var(n),
+                Expr::Index(obj, idx, _) => Target::Index(*obj, *idx),
+                Expr::Attr(obj, name, _) => Target::Attr(*obj, name),
+                _ => return Err(format!(
+                    "दोषः पङ्क्तौ {} — एतस्मै मूल्यं दातुं न शक्यम्\n\
+                     Error at line {} — cannot assign to this expression", line, line)),
+            };
+            return Ok(Stmt::Assign { target, expr: value, line });
+        }
         self.eat_end()?;
         Ok(Stmt::ExprStmt(e))
     }
 
-    fn if_stmt(&mut self) -> PResult<Stmt> {
+    fn class_def(&mut self) -> PResult<Stmt> {
         let line = self.line();
-        self.advance(); // यदि
+        self.advance(); // वर्गः
+        let name = self.ident("वर्गनाम अपेक्षितम् / expected a class name")?;
+        let mut parent = None;
+        if self.is_op(":") {
+            self.advance();
+            parent = Some(self.ident("मातृवर्गनाम अपेक्षितम् / expected a parent class")?);
+        }
+        self.eat_op("{")?;
+        let mut methods = Vec::new();
+        while !self.is_op("}") {
+            if matches!(self.peek().tok, Tok::Eof) {
+                return Err(format!(
+                    "दोषः पङ्क्तौ {} — '}}' अपेक्षितम् वर्गान्ते\n\
+                     Error at line {} — expected '}}' to close the class",
+                    self.line(), self.line()));
+            }
+            self.eat_kw("विधि").map_err(|_| format!(
+                "दोषः पङ्क्तौ {} — वर्गे केवलं 'विधि' लेख्याः\n\
+                 Error at line {} — only विधि (methods) are allowed inside a वर्गः",
+                self.line(), self.line()))?;
+            let mname = self.ident("विधिनाम अपेक्षितम् / expected a method name")?;
+            let params = self.param_list()?;
+            let body = self.block()?;
+            methods.push(Method { name: mname, params, body });
+        }
+        self.advance(); // }
+        Ok(Stmt::Class { name, parent, methods, line })
+    }
+
+    fn param_list(&mut self) -> PResult<Vec<Param>> {
         self.eat_op("(")?;
-        let cond = self.expression()?;
-        self.eat_op(")")?;
-        let body = self.block()?;
-        let mut branches = vec![(cond, body)];
-        let mut else_body = None;
-        loop {
-            if self.is_kw("अथ") {
+        let mut params = Vec::new();
+        if !self.is_op(")") {
+            params.push(self.param()?);
+            while self.is_op(",") {
                 self.advance();
-                if !self.is_kw("यदि") {
-                    return Err(format!("दोषः पङ्क्तौ {} — 'अथ' अनन्तरं 'यदि' अपेक्षितम्",
-                                       self.line()));
-                }
-                self.advance();
-                self.eat_op("(")?;
-                let c = self.expression()?;
-                self.eat_op(")")?;
-                let b = self.block()?;
-                branches.push((c, b));
-            } else if self.is_kw("अन्यथा") {
-                self.advance();
-                else_body = Some(self.block()?);
-                break;
-            } else {
-                break;
+                params.push(self.param()?);
             }
         }
-        Ok(Stmt::If { branches, else_body, line })
+        self.eat_op(")")?;
+        Ok(params)
     }
 
     /// Parameter: `नाम` or `कर्म नाम` (kāraka role + name).
@@ -201,12 +254,10 @@ impl Parser {
         let line = self.line();
         let first = self.ident("मापदण्डनाम अपेक्षितम् / expected a parameter name")?;
         if matches!(self.peek().tok, Tok::Id(_)) {
-            // two identifiers in a row → the first must be a kāraka
             if !KARAKAS.contains(&first.as_str()) {
                 return Err(format!(
                     "दोषः पङ्क्तौ {} — '{}' कारकं न — कारकाणि: कर्ता, कर्म, करण, सम्प्रदान, अपादान, अधिकरण\n\
-                     Error at line {} — '{}' is not a kāraka role",
-                    line, first, line, first));
+                     Error at line {} — '{}' is not a kāraka role", line, first, line, first));
             }
             let name = self.ident("मापदण्डनाम अपेक्षितम्")?;
             return Ok(Param { karaka: Some(first), name });
@@ -223,8 +274,9 @@ impl Parser {
                 let line = self.line();
                 if !KARAKAS.contains(&label.as_str()) {
                     return Err(format!(
-                        "दोषः पङ्क्तौ {} — '{}' कारकं न / '{}' is not a kāraka label",
-                        line, label, label));
+                        "दोषः पङ्क्तौ {} — '{}' कारकं न\n\
+                         Error at line {} — '{}' is not a kāraka label",
+                        line, label, line, label));
                 }
                 self.advance(); // label
                 self.advance(); // :
@@ -243,6 +295,35 @@ impl Parser {
         } else {
             Err(format!("दोषः पङ्क्तौ {} — {}", self.line(), msg))
         }
+    }
+
+    fn if_stmt(&mut self) -> PResult<Stmt> {
+        let line = self.line();
+        self.advance(); // यदि
+        self.eat_op("(")?;
+        let cond = self.expression()?;
+        self.eat_op(")")?;
+        let body = self.block()?;
+        let mut branches = vec![(cond, body)];
+        let mut else_body = None;
+        loop {
+            if self.is_kw("अथ") {
+                self.advance();
+                self.eat_kw("यदि")?;
+                self.eat_op("(")?;
+                let c = self.expression()?;
+                self.eat_op(")")?;
+                let b = self.block()?;
+                branches.push((c, b));
+            } else if self.is_kw("अन्यथा") {
+                self.advance();
+                else_body = Some(self.block()?);
+                break;
+            } else {
+                break;
+            }
+        }
+        Ok(Stmt::If { branches, else_body, line })
     }
 
     // ---- expressions (precedence climbing) ----
@@ -340,11 +421,80 @@ impl Parser {
             let sub = self.unary()?;
             return Ok(Expr::Unary("-".into(), Box::new(sub), line));
         }
-        self.primary()
+        let base = self.primary()?;
+        self.postfix(base)
+    }
+
+    /// Chained calls, indexing and attribute access: `अ.ब(क)[ख].ग`
+    fn postfix(&mut self, mut e: Expr) -> PResult<Expr> {
+        loop {
+            let line = self.line();
+            if self.is_op("(") {
+                self.advance();
+                let mut args = Vec::new();
+                if !self.is_op(")") {
+                    args.push(self.argument()?);
+                    while self.is_op(",") {
+                        self.advance();
+                        args.push(self.argument()?);
+                    }
+                }
+                self.eat_op(")")?;
+                e = Expr::Call(Box::new(e), args, line);
+            } else if self.is_op("[") {
+                self.advance();
+                let idx = self.expression()?;
+                self.eat_op("]")?;
+                e = Expr::Index(Box::new(e), Box::new(idx), line);
+            } else if self.is_op(".") {
+                self.advance();
+                let name = self.ident("नाम अपेक्षितम् '.' अनन्तरम् / expected a name after '.'")?;
+                e = Expr::Attr(Box::new(e), name, line);
+            } else {
+                break;
+            }
+        }
+        Ok(e)
     }
 
     fn primary(&mut self) -> PResult<Expr> {
         let line = self.line();
+        // list literal
+        if self.is_op("[") {
+            self.advance();
+            let mut items = Vec::new();
+            if !self.is_op("]") {
+                items.push(self.expression()?);
+                while self.is_op(",") {
+                    self.advance();
+                    if self.is_op("]") { break; }          // trailing comma
+                    items.push(self.expression()?);
+                }
+            }
+            self.eat_op("]")?;
+            return Ok(Expr::List(items, line));
+        }
+        // map literal
+        if self.is_op("{") {
+            self.advance();
+            let mut pairs = Vec::new();
+            if !self.is_op("}") {
+                loop {
+                    let k = self.expression()?;
+                    self.eat_op(":")?;
+                    let v = self.expression()?;
+                    pairs.push((k, v));
+                    if self.is_op(",") {
+                        self.advance();
+                        if self.is_op("}") { break; }      // trailing comma
+                        continue;
+                    }
+                    break;
+                }
+            }
+            self.eat_op("}")?;
+            return Ok(Expr::Map(pairs, line));
+        }
         let t = self.advance();
         match t.tok {
             Tok::Num(s) => Ok(Expr::Num(s)),
@@ -353,31 +503,25 @@ impl Parser {
                 "सत्यम्" => Ok(Expr::Bool(true)),
                 "असत्यम्" => Ok(Expr::Bool(false)),
                 "शून्यम्" => Ok(Expr::Nil),
-                _ => Err(format!("दोषः पङ्क्तौ {} — अनपेक्षितः शब्दः '{}'", line, k)),
-            },
-            Tok::Id(name) => {
-                if self.is_op("(") {
-                    self.advance(); // (
-                    let mut args = Vec::new();
-                    if !self.is_op(")") {
-                        args.push(self.argument()?);
-                        while self.is_op(",") {
-                            self.advance();
-                            args.push(self.argument()?);
-                        }
-                    }
-                    self.eat_op(")")?;
-                    Ok(Expr::Call(name, args, line))
-                } else {
-                    Ok(Expr::Var(name, line))
+                "अयम्" => Ok(Expr::Var("अयम्".into(), line)),
+                "सृज" => {
+                    let base = self.primary()?;
+                    let inner = self.postfix(base)?;
+                    Ok(Expr::New(Box::new(inner), line))
                 }
-            }
+                _ => Err(format!(
+                    "दोषः पङ्क्तौ {} — अनपेक्षितः शब्दः '{}'\n\
+                     Error at line {} — unexpected keyword '{}'", line, k, line, k)),
+            },
+            Tok::Id(name) => Ok(Expr::Var(name, line)),
             Tok::Op(o) if o == "(" => {
                 let e = self.expression()?;
                 self.eat_op(")")?;
                 Ok(e)
             }
-            other => Err(format!("दोषः पङ्क्तौ {} — अनपेक्षितं चिह्नम् '{:?}'", line, other)),
+            other => Err(format!(
+                "दोषः पङ्क्तौ {} — अनपेक्षितं चिह्नम् '{:?}'\n\
+                 Error at line {} — unexpected token", line, other, line)),
         }
     }
 }

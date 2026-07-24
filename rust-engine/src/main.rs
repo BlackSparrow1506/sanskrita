@@ -1,5 +1,6 @@
 // main.rs — संस्कृता वेगः engine (native Rust).
-// Slices 1–4: lexer + parser + evaluator with functions & recursion.
+// Slices 1–6: lexer, parser, evaluator — exact numbers, functions,
+// collections, classes, try/catch.
 //
 // Build:  cargo build --release
 // Test:   cargo test
@@ -12,6 +13,7 @@ mod err;
 mod nfc;
 mod lexer;
 mod ast;
+mod value;
 mod parser;
 mod interp;
 
@@ -35,7 +37,7 @@ const RUN_STACK_BUDGET: usize = 192 * 1024 * 1024;
 fn main() {
     let args: Vec<String> = env::args().collect();
     if args.iter().any(|a| a == "--version") {
-        println!("वेगः — संस्कृता native engine v{} (slices 1–4)", VERSION);
+        println!("वेगः — संस्कृता native engine v{} (slices 1–6)", VERSION);
         return;
     }
     if args.len() < 2 || args.iter().any(|a| a == "--help") {

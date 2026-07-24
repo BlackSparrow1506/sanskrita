@@ -23,7 +23,32 @@ fn alias(word: &str) -> &str {
         "anuvarta" | "anuvart" => "अनुवर्त",
         "vidhi" => "विधि",
         "phalam" => "फलम्",
+        "pratyekam" => "प्रत्येकम्",
+        "iti" => "इति",
+        "vargah" | "varga" => "वर्गः",
+        "srja" | "srija" => "सृज",
+        "ayam" => "अयम्",
+        "prayata" | "prayat" => "प्रयत",
+        "doshe" => "दोषे",
         "vada" | "vad" => "वद",
+        // kāraka role labels
+        "kartaa" | "karta" => "कर्ता",
+        "karma" => "कर्म",
+        "karana" => "करण",
+        "sampradaana" | "sampradana" => "सम्प्रदान",
+        "apaadaana" | "apadana" => "अपादान",
+        "adhikarana" => "अधिकरण",
+        // builtins
+        "yojaya" => "योजय",
+        "apanaya" => "अपनय",
+        "kunjikaah" | "kunjikah" | "kunjika" => "कुञ्जिकाः",
+        "kramaya" => "क्रमय",
+        "paridhih" | "paridhi" => "परिधिः",
+        "prakarah" | "prakara" => "प्रकारः",
+        "dairghyam" | "dairghya" => "दैर्घ्यम्",
+        "vaakyam" | "vakyam" => "वाक्यम्",
+        "sankhyaa" | "sankhya" => "सङ्ख्या",
+        "aarambha" | "arambha" => "आरम्भ",
         other => other,
     }
 }
@@ -31,6 +56,7 @@ fn alias(word: &str) -> &str {
 const KEYWORDS: &[&str] = &[
     "मानय", "ध्रुव", "यदि", "अथ", "अन्यथा", "यावत्", "सत्यम्", "असत्यम्",
     "शून्यम्", "च", "वा", "न", "विरम", "अनुवर्त", "विधि", "फलम्",
+    "प्रत्येकम्", "इति", "वर्गः", "सृज", "अयम्", "प्रयत", "दोषे",
 ];
 
 fn dev_digit(c: char) -> Option<i64> {
