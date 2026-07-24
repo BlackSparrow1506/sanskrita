@@ -79,6 +79,9 @@ fn is_ident_cont(c: char) -> bool {
 }
 
 pub fn lex(src: &str) -> Result<Vec<Token>, String> {
+    // §10 #8: normalization is mandatory — visually identical text must be
+    // identical to the engine (matches the Python reference's NFC call).
+    let src = crate::nfc::normalize(src);
     let chars: Vec<char> = src.chars().collect();
     let n = chars.len();
     let mut i = 0usize;
@@ -118,9 +121,16 @@ pub fn lex(src: &str) -> Result<Vec<Token>, String> {
                 out.push(Token::new(Tok::Str(buf), line));
             }
             _ if is_digit(c) => {
+                // overflow-checked: a huge literal must error, never wrap
                 let mut val: i64 = 0;
                 while i < n && is_digit(chars[i]) {
-                    val = val * 10 + digit_val(chars[i]);
+                    val = match val.checked_mul(10)
+                        .and_then(|v| v.checked_add(digit_val(chars[i]))) {
+                        Some(v) => v,
+                        None => return Err(format!(
+                            "दोषः पङ्क्तौ {} — सङ्ख्या अतिविशाला / integer literal too large",
+                            line)),
+                    };
                     i += 1;
                 }
                 // decimals belong to a later slice; stop at '.' here
@@ -235,5 +245,19 @@ mod tests {
     fn identifier_with_matras_and_digits() {
         let toks = lex("मानय वर्ष२ = ५।").unwrap();
         assert_eq!(toks[1].tok, Tok::Id("वर्ष२".into()));
+    }
+
+    // NFC: the same name typed two different ways must lex identically
+    #[test]
+    fn nfc_identifier_equivalence() {
+        let a = lex("मानय \u{0958}मल = ५।").unwrap();          // क़ precomposed
+        let b = lex("मानय \u{0915}\u{093C}मल = ५।").unwrap();  // क + nukta
+        assert_eq!(a[1].tok, b[1].tok);
+    }
+
+    // huge literals must error, never silently wrap
+    #[test]
+    fn integer_literal_overflow_errors() {
+        assert!(lex("मानय क = ९९९९९९९९९९९९९९९९९९९९९९९९।").is_err());
     }
 }

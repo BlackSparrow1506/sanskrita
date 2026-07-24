@@ -171,7 +171,10 @@ impl Interp {
                     "!=" => Ok(Value::Bool(lv != rv)),
                     "<" | ">" | "<=" | ">=" => self.compare(op, &lv, &rv, *line),
                     "+" => match (&lv, &rv) {
-                        (Value::Int(a), Value::Int(b)) => Ok(Value::Int(a + b)),
+                        (Value::Int(a), Value::Int(b)) => a.checked_add(*b)
+                            .map(Value::Int)
+                            .ok_or_else(|| format!(
+                                "दोषः पङ्क्तौ {} — सङ्ख्या अतिविशाला / integer overflow", line)),
                         (Value::Str(a), Value::Str(b)) => Ok(Value::Str(format!("{}{}", a, b))),
                         _ => Err(format!(
                             "दोषः पङ्क्तौ {} — वाक्यं सङ्ख्या च न मिश्रणीये / cannot mix text and number", line)),
@@ -191,22 +194,40 @@ impl Interp {
         }
     }
 
+    // All integer arithmetic is overflow-CHECKED. Rust would panic in debug and
+    // silently wrap in release; the Python reference has arbitrary precision, so
+    // wrapping would be a silent wrong answer — unacceptable. We raise a proper
+    // bilingual error instead (bignum support arrives with the decimal slice).
     fn int_arith(&self, op: &str, a: i64, b: i64, line: usize) -> RResult<Value> {
+        let overflow = || format!(
+            "दोषः पङ्क्तौ {} — सङ्ख्या अतिविशाला (पूर्णाङ्क-सीमातिक्रमः) / integer overflow",
+            line);
         match op {
-            "-" => Ok(Value::Int(a - b)),
-            "*" => Ok(Value::Int(a * b)),
+            "-" => a.checked_sub(b).map(Value::Int).ok_or_else(overflow),
+            "*" => a.checked_mul(b).map(Value::Int).ok_or_else(overflow),
             "%" => {
-                if b == 0 { return Err(format!("दोषः पङ्क्तौ {} — शून्येन भागो न शक्यः", line)); }
-                Ok(Value::Int(a % b))
+                if b == 0 {
+                    return Err(format!("दोषः पङ्क्तौ {} — शून्येन भागो न शक्यः", line));
+                }
+                // Python semantics: floored remainder (-७ % ३ == २), whereas
+                // Rust's '%' truncates (-1). Match the reference exactly.
+                let r = a.checked_rem(b).ok_or_else(overflow)?;
+                let r = if (r != 0) && ((r < 0) != (b < 0)) { r + b } else { r };
+                Ok(Value::Int(r))
             }
             "/" => {
-                if b == 0 { return Err(format!("दोषः पङ्क्तौ {} — शून्येन भागो न शक्यः", line)); }
-                // exact decimals arrive in a later slice; for now integer '/'
-                // that divides evenly is exact, otherwise we defer honestly.
-                if a % b == 0 { Ok(Value::Int(a / b)) }
-                else { Err(format!(
-                    "दोषः पङ्क्तौ {} — दशमांश-विभागः अग्रिमे स्लाइसे / decimal '/' not yet in veg engine",
-                    line)) }
+                if b == 0 {
+                    return Err(format!("दोषः पङ्क्तौ {} — शून्येन भागो न शक्यः", line));
+                }
+                // exact decimals arrive in a later slice; evenly-divisible
+                // integer division is exact and safe to answer now.
+                if a % b == 0 {
+                    a.checked_div(b).map(Value::Int).ok_or_else(overflow)
+                } else {
+                    Err(format!(
+                        "दोषः पङ्क्तौ {} — दशमांश-विभागः अग्रिमे स्लाइसे / decimal '/' not yet in veg engine",
+                        line))
+                }
             }
             _ => Err("आन्तरिकदोषः".into()),
         }
@@ -341,5 +362,38 @@ mod tests {
     #[test]
     fn const_guard() {
         assert!(run_ok("ध्रुव क = ५। क = ६।").is_err());
+    }
+
+    // Python-compatible floored modulo: -७ % ३ == २ (Rust's raw % gives -1)
+    #[test]
+    fn modulo_matches_python_semantics() {
+        assert_eq!(eval_expr("मानय प = ०-७। प = प % ३।"), Value::Int(2));
+        assert_eq!(eval_expr("मानय प = ७ % ३।"), Value::Int(1));
+    }
+
+    // overflow must error, never wrap silently
+    #[test]
+    fn arithmetic_overflow_errors() {
+        let big = "मानय क = ९२२३३७२०३६८५४७७५८०७। क = क + १।";
+        assert!(run_ok(big).is_err());
+    }
+
+    #[test]
+    fn undeclared_assignment_errors() {
+        assert!(run_ok("क = ५।").is_err());
+    }
+
+    #[test]
+    fn non_boolean_condition_errors() {
+        assert!(run_ok("यदि (५) { वद(\"अ\")। }").is_err());
+    }
+
+    #[test]
+    fn break_and_continue() {
+        assert_eq!(
+            eval_expr("मानय प = ०। मानय इ = ०। यावत् (सत्यम्) { इ = इ + १। \
+                       यदि (इ % २ == ०) { अनुवर्त। } प = प + इ। \
+                       यदि (इ >= ९) { विरम। } }"),
+            Value::Int(25));   // 1+3+5+7+9
     }
 }
