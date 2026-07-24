@@ -12,7 +12,8 @@ as a test.
 | 2 | **High** | Integer overflow: Rust panics in debug and **silently wraps in release**, where the Python reference has arbitrary precision. A wrong answer with no error is the worst failure mode. | All arithmetic uses `checked_*`; numeric literals too. Overflow now raises a bilingual error. |
 | 3 | **High** | `%` semantics: Rust truncates (`-७ % ३ == -१`), Python floors (`== २`). Silent wrong answers on negative operands. | Floored remainder implemented to match the reference; test added. |
 | 4 | Medium | No Unicode normalization, so `क़` typed as one codepoint ≠ `क + ़` typed as two — the "ghost bug" §10 #8 forbids. | `nfc.rs`: dependency-free NFC for the Devanagari block (the 8 nukta composition exclusions); test added. |
-| 5 | Low | Error format didn't match the reference (single line, ASCII digits). | `err.rs` produces the exact two-line bilingual shape with Devanagari line numbers. |
+| 5 | Low | Error format didn't match the reference (single line). | Messages now use the reference's two-line bilingual shape. **Partially done:** the line number still prints in ASCII on the Sanskrit line (५ vs 5); `err.rs` holds the correct formatter and becomes the error type in slice 5. |
+| 7 | **High** | Recursion guard was set above what the stack could hold, so runaway recursion crashed the process (stack overflow) instead of erroring — caught by our own test. | Depth limit is now conservative by default (400, safe for a 2 MB test thread on any build profile) and configurable; the binary runs the program on a 256 MB stack with a 20,000 limit. Deep recursion works; runaway recursion always errors cleanly. |
 | 6 | Low | No `--version`/`--help`; dead-code warnings. | Added; warnings silenced with intent documented. |
 
 ## Known, tracked divergences (not bugs — decisions pending)

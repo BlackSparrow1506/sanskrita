@@ -1,4 +1,13 @@
-// err.rs — bilingual errors, byte-identical in shape to the Python reference:
+// err.rs — bilingual error scaffolding.
+//
+// STATUS (honest): the engine currently returns `String` errors that already
+// have the correct two-line bilingual SHAPE, but print the line number in ASCII
+// on the Sanskrit line where the Python reference prints Devanagari (५ vs 5).
+// This module holds the correct formatting and becomes the engine's error type
+// in slice 5, when errors also gain source spans. Tracked in AUDIT.md.
+#![allow(dead_code)]
+
+// bilingual errors, byte-identical in shape to the Python reference:
 //
 //   दोषः पङ्क्तौ ५ — <sanskrit>
 //   Error at line 5 — <english>

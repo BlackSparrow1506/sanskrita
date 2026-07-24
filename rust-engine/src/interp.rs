@@ -66,11 +66,18 @@ pub struct Interp {
     scopes: Vec<Scope>,
     current: usize,
     depth: usize,
+    max_depth: usize,
 }
 
 type RResult<T> = Result<T, String>;
 
-const MAX_DEPTH: usize = 2000;
+/// Recursion limit for the DEFAULT stack (~2 MB on a spawned thread, which is
+/// what `cargo test` gives us). Each संस्कृता call consumes several native
+/// frames (call → exec_block → exec → eval → call), and debug builds use far
+/// more stack per frame than release, so this is deliberately conservative:
+/// the guard must fire *before* the stack runs out, on every build profile.
+/// The binary raises it — see main.rs, which runs on a 256 MB stack.
+pub const DEFAULT_MAX_DEPTH: usize = 400;
 
 fn dev_num(mut x: i64) -> String {
     let digits = ['०', '१', '२', '३', '४', '५', '६', '७', '८', '९'];
@@ -98,7 +105,19 @@ fn dev_num(mut x: i64) -> String {
 
 impl Interp {
     pub fn new() -> Self {
-        Interp { scopes: vec![Scope::new(None)], current: 0, depth: 0 }
+        Interp {
+            scopes: vec![Scope::new(None)],
+            current: 0,
+            depth: 0,
+            max_depth: DEFAULT_MAX_DEPTH,
+        }
+    }
+
+    /// Raise the recursion limit — only safe when the caller has arranged a
+    /// correspondingly large stack (see main.rs).
+    pub fn with_max_depth(mut self, n: usize) -> Self {
+        self.max_depth = n;
+        self
     }
 
     // ---- scope helpers ----
@@ -403,7 +422,7 @@ impl Interp {
     }
 
     fn call_function(&mut self, f: &Rc<Function>, args: &[Arg], line: usize) -> RResult<Value> {
-        if self.depth >= MAX_DEPTH {
+        if self.depth >= self.max_depth {
             return Err(format!(
                 "दोषः पङ्क्तौ {} — अतिगभीरा पुनरावृत्तिः\n\
                  Error at line {} — recursion too deep", line, line));
