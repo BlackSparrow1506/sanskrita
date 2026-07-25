@@ -70,6 +70,25 @@ all but a missing feature nobody had noticed.
 | 21 | Medium | My first traceback implementation wrapped `call_function` in a thin outer function so it could append a frame on the way out. That cost **one native stack frame on every call** — and a tree-walker pays for every frame several times over. A 25-deep factorial went over the recursion guard. | Frames are appended only while *unwinding*, so the normal path costs nothing. |
 | 22 | Low | A first attempt at the traceback snapshotted the whole call stack at the innermost frame. That would have given a `प्रयत` sitting half-way up frames from *above* itself, which the reference does not do. Caught by reasoning about the semantics before shipping, not by a test. | Each विधि appends its own frame as the error escapes it — so a catch half-way up sees only what the error actually passed through. Differential case added. |
 
+## Found by running `तुल्यता.py` on the real machine (v0.5.1)
+
+`cargo test` passed and the differential harness still reported **12
+divergences**. Unit tests check what one engine does; only the differential
+harness checks that the two engines are the same language.
+
+| # | Severity | Issue | Fix |
+|---|---|---|---|
+| 23 | **High** | **वेगः had no closures.** Every call's scope was parented to the *globals*, so a विधि defined inside another विधि could not see the enclosing variables — while the reference has had proper lexical closures since v0.2. The scope arena (`Vec<Scope>` indexed by number, popped after each call) made capture impossible by construction. | Scopes are now an `Rc<RefCell<Scope>>` chain, and a `Function` carries the scope it was **defined** in — exactly what the reference does (`Env(parent=fn.closure)`). A captured scope stays alive as long as the function holding it. Four unit tests and four differential cases, including a counter that mutates its captured variable. |
+| 24 | **High** | **Five native modules were unimportable in वेगः.** `सारणी`, `गूढ`, `परिवेशः`, `लेखनी` and `नियमितम्` were implemented in `stdlib.rs` and registered in `members()`, but the *import* statement has its own separate list of module names, and that list was never updated. Every program using CSV, hashing, environment access or logging failed on वेगः — including three of the new real-world examples. | Both lists updated, with a comment at each saying the other exists. |
+| 25 | Medium | The reference engine refused to **compare a द्रुतदशमांशः with a number**: `compare()` accepted `(int, Decimal)` only, so `द्रुतदशमांशः(२) > १` raised "तुलना समानप्रकारयोः एव". वेगः allowed it. A number is a number — the reference was wrong. | `float` added to the comparison types. |
+| 26 | Low | Two of my own differential cases used `न` (the keyword "not") as a parameter name, so the *reference* errored and the case never tested anything. | Renamed. A test that fails to run is worse than no test. |
+
+**The lesson, plainly:** items 20 and 23 are the same mistake — a feature the
+reference had for months, missing from वेगः, invisible because no test in the
+differential harness happened to use it. Lambdas and closures are not obscure.
+The harness is only as good as its cases, which is why every fix above lands
+with a case that would have caught it.
+
 **Worth writing down:** in a **debug** build one संस्कृता call costs tens of
 kilobytes of native stack — the evaluator is a large recursive function and
 rustc gives every match arm its own slots. So the 1 MB default budget, sized for

@@ -12,11 +12,23 @@ use crate::ast::{Param, Stmt};
 use crate::bigint::BigInt;
 use crate::decimal::Decimal;
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Function {
     pub name: String,
     pub params: Vec<Param>,
     pub body: Vec<Stmt>,
+    /// The scope this विधि was DEFINED in — what makes it a closure. A call
+    /// runs inside a fresh scope whose parent is this one, so the function can
+    /// still see the variables that surrounded it when it was created.
+    pub env: crate::interp::ScopeRef,
+}
+
+// Scopes contain Values which contain Functions, so deriving Debug would
+// recurse forever on a closure that captured itself.
+impl std::fmt::Debug for Function {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Function({}, {} params)", self.name, self.params.len())
+    }
 }
 
 #[derive(Debug)]

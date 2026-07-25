@@ -2704,7 +2704,10 @@ class Interpreter:
         raise SanskritaError(line, f"अज्ञातो विधिः '{name}'", f"unknown builtin '{name}'")
 
     def compare(self, op, a, b, line):
-        num = (int, Decimal)
+        # float belongs here too: द्रुतदशमांशः is a number, and `द्रुतदशमांशः(२) > १`
+        # must mean what it says. वेगः already allowed it — this was the
+        # divergence, caught by तुल्यता.
+        num = (int, float, Decimal)
         ok = (isinstance(a, num) and not isinstance(a, bool)
               and isinstance(b, num) and not isinstance(b, bool)) or \
              (isinstance(a, str) and isinstance(b, str))

@@ -13,6 +13,19 @@ them is listed under **Breaking** below.
 
 ### Fixed
 
+- **वेगः had no closures.** A विधि defined inside another विधि could not see
+  the enclosing variables: every call ran parented to the globals. The reference
+  engine has had proper lexical closures since v0.2. वेगः now links scopes the
+  same way the reference does, so a function carries the scope it was defined
+  in — counters, adder factories and nested named functions all behave
+  identically in both engines.
+- **Five modules were unimportable in वेगः.** `सारणी`, `गूढ`, `परिवेशः`, `लेखनी`
+  and `नियमितम्` were implemented but missing from the import statement's own
+  list of native module names, so every program using CSV, hashing, environment
+  access or logging failed on the native engine.
+- **The reference refused `द्रुतदशमांशः(२) > १`** — its comparison accepted only
+  exact numbers, while वेगः allowed it. A number is a number; the reference was
+  wrong.
 - **वेगः never supported lambdas.** `विधि(क) { … }` used as a *value* — passed
   to `सू.छानय`, stored in a सूची, returned from a विधि — worked in the reference
   engine but was a parse error in वेगः. It had been missing since lambdas

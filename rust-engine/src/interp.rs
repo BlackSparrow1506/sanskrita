@@ -19,16 +19,29 @@ use crate::value::{Class, Function, Instance, Key, MapData, Value};
 /// default decimal context (28 significant digits).
 const DIV_DIGITS: usize = 28;
 
-/// A lexical scope. `parent` indexes into Interp::scopes (arena).
-struct Scope {
-    vars: HashMap<String, Value>,
-    consts: HashSet<String>,
-    parent: Option<usize>,
+/// A lexical scope, linked to the one it was created inside.
+///
+/// This used to be an arena of `Vec<Scope>` indexed by number, with every call
+/// parented to the globals — which meant a विधि defined inside another विधि
+/// could not see the enclosing variables. That is to say: वेगः had no closures,
+/// while the reference engine has had them since v0.2. Rc-linked scopes are
+/// what the reference does (`Env(parent=fn.closure)`), and a captured scope now
+/// stays alive exactly as long as the function that captured it.
+pub struct Scope {
+    pub vars: HashMap<String, Value>,
+    pub consts: HashSet<String>,
+    pub parent: Option<ScopeRef>,
 }
 
+pub type ScopeRef = Rc<RefCell<Scope>>;
+
 impl Scope {
-    fn new(parent: Option<usize>) -> Self {
-        Scope { vars: HashMap::new(), consts: HashSet::new(), parent }
+    pub fn new(parent: Option<ScopeRef>) -> ScopeRef {
+        Rc::new(RefCell::new(Scope {
+            vars: HashMap::new(),
+            consts: HashSet::new(),
+            parent,
+        }))
     }
 }
 
@@ -40,8 +53,10 @@ enum Flow {
 }
 
 pub struct Interp {
-    scopes: Vec<Scope>,
-    current: usize,
+    /// The scope statements execute in right now.
+    current: ScopeRef,
+    /// The outermost scope — where builtins are shadowed and modules land.
+    globals: ScopeRef,
     depth: usize,
     max_depth: usize,
     anchor: usize,
@@ -139,9 +154,10 @@ fn err2k(line: usize, sa: &str, en: &str, kind: &str) -> String {
 impl Interp {
     pub fn new() -> Self {
         let probe = 0u8;
+        let globals = Scope::new(None);
         Interp {
-            scopes: vec![Scope::new(None)],
-            current: 0,
+            current: globals.clone(),
+            globals,
             depth: 0,
             max_depth: DEFAULT_MAX_DEPTH,
             anchor: &probe as *const u8 as usize,
@@ -168,26 +184,45 @@ impl Interp {
 
     // ---- scope helpers ----
 
-    fn lookup(&self, name: &str) -> Option<&Value> {
-        let mut idx = Some(self.current);
-        while let Some(i) = idx {
-            if let Some(v) = self.scopes[i].vars.get(name) {
-                return Some(v);
+    /// The value bound to `name`, searching outwards through the scope chain.
+    /// Returns an owned Value: every caller cloned it anyway, and a borrow
+    /// cannot outlive the RefCell it came from.
+    fn lookup(&self, name: &str) -> Option<Value> {
+        let mut cur = Some(self.current.clone());
+        while let Some(sc) = cur {
+            if let Some(v) = sc.borrow().vars.get(name) {
+                return Some(v.clone());
             }
-            idx = self.scopes[i].parent;
+            let next = sc.borrow().parent.clone();
+            cur = next;
         }
         None
     }
 
-    fn scope_of(&self, name: &str) -> Option<usize> {
-        let mut idx = Some(self.current);
-        while let Some(i) = idx {
-            if self.scopes[i].vars.contains_key(name) {
-                return Some(i);
+    /// The scope that actually holds `name` — where an assignment must write.
+    fn scope_of(&self, name: &str) -> Option<ScopeRef> {
+        let mut cur = Some(self.current.clone());
+        while let Some(sc) = cur {
+            if sc.borrow().vars.contains_key(name) {
+                return Some(sc);
             }
-            idx = self.scopes[i].parent;
+            let next = sc.borrow().parent.clone();
+            cur = next;
         }
         None
+    }
+
+    /// Read a global — used by the test helpers and by the REPL.
+    pub fn global(&self, name: &str) -> Option<Value> {
+        self.globals.borrow().vars.get(name).cloned()
+    }
+
+    fn declare(&mut self, name: &str, v: Value, is_const: bool) {
+        let mut sc = self.current.borrow_mut();
+        sc.vars.insert(name.to_string(), v);
+        if is_const {
+            sc.consts.insert(name.to_string());
+        }
     }
 
     pub fn run(&mut self, stmts: &[Stmt]) -> RResult<()> {
@@ -250,7 +285,7 @@ impl Interp {
     fn exec(&mut self, st: &Stmt) -> RResult<Flow> {
         match st {
             Stmt::Let { name, expr, is_const, ty, nullable, line } => {
-                if self.scopes[self.current].consts.contains(name) {
+                if self.current.borrow().consts.contains(name) {
                     return Err(err2(*line,
                         &format!("'{}' ध्रुवः — परिवर्तनं न शक्यम्", name),
                         &format!("'{}' is a constant", name)));
@@ -259,24 +294,20 @@ impl Interp {
                 if let Some(t) = ty {
                     self.check_type(name, t, &v, *nullable, *line)?;
                 }
-                let cur = self.current;
-                self.scopes[cur].vars.insert(name.clone(), v);
-                if *is_const {
-                    self.scopes[cur].consts.insert(name.clone());
-                }
+                self.declare(name, v, *is_const);
                 Ok(Flow::Normal)
             }
             Stmt::Assign { target, expr, line } => {
                 let v = self.eval(expr)?;
                 match target {
                     Target::Var(name) => match self.scope_of(name) {
-                        Some(i) => {
-                            if self.scopes[i].consts.contains(name) {
+                        Some(sc) => {
+                            if sc.borrow().consts.contains(name) {
                                 return Err(err2(*line,
                                     &format!("'{}' ध्रुवः — परिवर्तनं न शक्यम्", name),
                                     &format!("'{}' is a constant", name)));
                             }
-                            self.scopes[i].vars.insert(name.clone(), v);
+                            sc.borrow_mut().vars.insert(name.clone(), v);
                         }
                         None => return Err(err2(*line,
                             &format!("'{}' अघोषितम् — प्रथमं 'मानय' प्रयुज्यताम्", name),
@@ -338,9 +369,9 @@ impl Interp {
                     name: name.clone(),
                     params: params.clone(),
                     body: body.clone(),
+                    env: self.current.clone(),
                 }));
-                let cur = self.current;
-                self.scopes[cur].vars.insert(name.clone(), f);
+                self.declare(name, f, false);
                 Ok(Flow::Normal)
             }
             Stmt::Class { name, parent, methods, line } => {
@@ -359,6 +390,7 @@ impl Interp {
                         name: mname.clone(),
                         params: params.clone(),
                         body: body.clone(),
+                        env: self.current.clone(),
                     }));
                 }
                 let class = Value::Class(Rc::new(Class {
@@ -366,14 +398,17 @@ impl Interp {
                     parent: parent_class,
                     methods: map,
                 }));
-                let cur = self.current;
-                self.scopes[cur].vars.insert(name.clone(), class);
+                self.declare(name, class, false);
                 Ok(Flow::Normal)
             }
             Stmt::Import { module, alias, line } => {
+                // Every native module must be listed BOTH here and in
+                // stdlib::members(). Forgetting this list is how सारणी, गूढ,
+                // परिवेशः and लेखनी were implemented but unimportable.
                 const NATIVE: &[&str] = &["संस्कृतम्", "गणितम्", "यादृच्छिकम्",
                                           "कालः", "वाक्यकर्म", "सूचीकर्म",
-                                          "सञ्चिका", "जेसन"];
+                                          "सञ्चिका", "जेसन", "सारणी", "गूढ",
+                                          "परिवेशः", "लेखनी", "नियमितम्"];
                 let canon = match module.as_str() {
                     "sanskritam" => "संस्कृतम्",
                     "ganitam" => "गणितम्",
@@ -383,11 +418,15 @@ impl Interp {
                     "suchikarma" => "सूचीकर्म",
                     "sanchika" => "सञ्चिका",
                     "json" => "जेसन",
+                    "sarani" => "सारणी",
+                    "gudha" => "गूढ",
+                    "parivesha" => "परिवेशः",
+                    "lekhani" => "लेखनी",
+                    "niyamitam" => "नियमितम्",
                     other => other,
                 };
-                if let Some(found) = NATIVE.iter().find(|m| **m == canon) {
-                    let cur = self.current;
-                    self.scopes[cur].vars.insert(alias.clone(), Value::Module(found));
+                if let Some(found) = NATIVE.iter().copied().find(|m| *m == canon) {
+                    self.declare(alias, Value::Module(found), false);
                     return Ok(Flow::Normal);
                 }
                 if canon.starts_with("python:") {
@@ -424,9 +463,7 @@ impl Interp {
                         // but also answers .सन्देशः .पङ्क्तिः .प्रकारः .अनुरेखा
                         // and can be re-raised with क्षिप.
                         let e = crate::err::SError::decode(&msg);
-                        let cur = self.current;
-                        self.scopes[cur].vars
-                            .insert(err_name.clone(), Value::Err(Rc::new(e)));
+                        self.declare(err_name, Value::Err(Rc::new(e)), false);
                         self.exec_block(catch)
                     }
                 }
@@ -475,8 +512,7 @@ impl Interp {
                         "प्रत्येकम् needs a list, map, or text")),
                 };
                 for item in items {
-                    let cur = self.current;
-                    self.scopes[cur].vars.insert(var.clone(), item);
+                    self.declare(var, item, false);
                     match self.exec_block(body)? {
                         Flow::Break => break,
                         Flow::Return(v) => return Ok(Flow::Return(v)),
@@ -494,10 +530,11 @@ impl Interp {
         let base: PathBuf = self.source_dir.clone().unwrap_or_else(|| PathBuf::from("."));
         let path = base.join(rel);
         let key = path.to_string_lossy().to_string();
-        if let Some(m) = self.modules.get(&key) {
-            let m = m.clone();
-            let cur = self.current;
-            self.scopes[cur].vars.insert(alias.to_string(), m);
+        // Clone out of the cache BEFORE declaring: `self.modules.get(..)` keeps
+        // `self` borrowed for the whole `if let` body, and declare takes &mut self.
+        let cached = self.modules.get(&key).cloned();
+        if let Some(m) = cached {
+            self.declare(alias, m, false);
             return Ok(Flow::Normal);
         }
         let src = std::fs::read_to_string(&path).map_err(|_| err2(line,
@@ -507,22 +544,21 @@ impl Interp {
         let stmts = crate::parser::Parser::new(toks).program()?;
 
         // run the file in a fresh global scope, then capture its bindings
-        let saved_scopes = std::mem::replace(&mut self.scopes, vec![Scope::new(None)]);
-        let saved_current = self.current;
+        let fresh = Scope::new(None);
+        let saved_globals = std::mem::replace(&mut self.globals, fresh.clone());
+        let saved_current = std::mem::replace(&mut self.current, fresh.clone());
         let saved_dir = self.source_dir.clone();
-        self.current = 0;
         self.source_dir = path.parent().map(|p| p.to_path_buf());
         let result = self.exec_block(&stmts);
-        let captured: HashMap<String, Value> = self.scopes[0].vars.clone();
-        self.scopes = saved_scopes;
+        let captured: HashMap<String, Value> = fresh.borrow().vars.clone();
+        self.globals = saved_globals;
         self.current = saved_current;
         self.source_dir = saved_dir;
         result?;
 
         let module = Value::UserModule(Rc::new(RefCell::new(captured)), alias.to_string());
         self.modules.insert(key, module.clone());
-        let cur = self.current;
-        self.scopes[cur].vars.insert(alias.to_string(), module);
+        self.declare(alias, module, false);
         Ok(Flow::Normal)
     }
 
@@ -566,7 +602,7 @@ impl Interp {
             Expr::Bool(b) => Ok(Value::Bool(*b)),
             Expr::Nil => Ok(Value::Nil),
             Expr::Var(name, line) => match self.lookup(name) {
-                Some(v) => Ok(v.clone()),
+                Some(v) => Ok(v),
                 None => Err(err2k(*line,
                     &format!("अज्ञातं नाम '{}'", name),
                     &format!("unknown name '{}'", name),
@@ -693,6 +729,7 @@ impl Interp {
                 name: "<अनामविधिः>".into(),
                 params: params.clone(),
                 body: body.clone(),
+                env: self.current.clone(),
             }))),
             Expr::New(inner, line) => {
                 // `सृज वर्गः(…)` — the inner expression is the class call
@@ -925,9 +962,11 @@ impl Interp {
             return Err(err2(line, "अतिगभीरा पुनरावृत्तिः (स्मृति-सीमा)",
                             "recursion too deep (stack limit)"));
         }
-        let mut local = Scope::new(Some(0));
+        // THE closure line: a call runs inside the scope the विधि was DEFINED
+        // in, not inside the globals. Everything else here is bookkeeping.
+        let local = Scope::new(Some(f.env.clone()));
         if let Some(obj) = &self_obj {
-            local.vars.insert("अयम्".into(), Value::Object(obj.clone()));
+            local.borrow_mut().vars.insert("अयम्".into(), Value::Object(obj.clone()));
         }
         let mut pos_iter = positional.into_iter();
         // Parameters left to a default value are filled in AFTER the scope is
@@ -945,7 +984,7 @@ impl Interp {
                 pos_iter.next()
             };
             match bound {
-                Some(v) => { local.vars.insert(p.name.clone(), v); }
+                Some(v) => { local.borrow_mut().vars.insert(p.name.clone(), v); }
                 None => match &p.default {
                     Some(d) => defaults.push((p.name.clone(), d.clone())),
                     None => {
@@ -973,17 +1012,12 @@ impl Interp {
                 &format!("too many arguments for function '{}'", f.name)));
         }
 
-        self.scopes.push(local);
-        let saved = self.current;
-        self.current = self.scopes.len() - 1;
+        let saved = std::mem::replace(&mut self.current, local);
         self.depth += 1;
         let mut result = Ok(Flow::Normal);
         for (name, d) in &defaults {
             match self.eval(d) {
-                Ok(v) => {
-                    let cur = self.current;
-                    self.scopes[cur].vars.insert(name.clone(), v);
-                }
+                Ok(v) => { self.declare(name, v, false); }
                 Err(e) => { result = Err(e); break; }
             }
         }
@@ -992,7 +1026,6 @@ impl Interp {
         }
         self.depth -= 1;
         self.current = saved;
-        self.scopes.pop();
 
         // Each विधि the error escapes appends its own frame, so the trace holds
         // exactly the calls it passed through — an error caught by a प्रयत
@@ -1385,7 +1418,7 @@ mod tests {
         let stmts = Parser::new(toks).program().unwrap();
         let mut it = Interp::new();
         it.run(&stmts).unwrap();
-        let v = it.scopes[0].vars.get("प").cloned().unwrap();
+        let v = it.global("प").unwrap();
         it.display(&v)
     }
 
@@ -1394,7 +1427,7 @@ mod tests {
         let stmts = Parser::new(toks).program().unwrap();
         let mut it = Interp::new();
         it.run(&stmts).unwrap();
-        it.scopes[0].vars.get("प").cloned().unwrap()
+        it.global("प").unwrap()
     }
 
     // ---- slices 1–4 ----
@@ -1507,7 +1540,7 @@ mod tests {
                 let stmts = Parser::new(toks).program().unwrap();
                 let mut it = Interp::new().with_limits(1_000_000, 48 * 1024 * 1024);
                 it.run(&stmts).map_err(|e| crate::err::render(&e))?;
-                match it.scopes[0].vars.get("प") {
+                match it.global("प") {
                     Some(Value::Int(n)) => Ok(n.to_string_signed()),
                     other => Err(format!("unexpected value: {:?}", other)),
                 }
@@ -1762,7 +1795,7 @@ mod tests {
                 let stmts = Parser::new(toks).program().unwrap();
                 let mut it = Interp::new().with_limits(1_000_000, 48 * 1024 * 1024);
                 it.run(&stmts)?;
-                match it.scopes[0].vars.get("प") {
+                match it.global("प") {
                     Some(Value::Int(n)) => Ok(n.to_string_signed()),
                     other => Err(format!("unexpected value: {:?}", other)),
                 }
@@ -1887,7 +1920,7 @@ mod tests {
         let mut it = Interp::new();
         it.program_args = vec!["अ".into(), "ब".into()];
         it.run(&stmts).unwrap();
-        let v = it.scopes[0].vars.get("प").cloned().unwrap();
+        let v = it.global("प").unwrap();
         assert_eq!(it.display(&v), "[\"अ\", \"ब\"]");
     }
 
@@ -1988,6 +2021,43 @@ mod tests {
 
     fn caught(src: &str) -> String {
         shown(src)
+    }
+
+    // वेगः had NO closures until v0.5.1: every call was parented to the
+    // globals, so a विधि defined inside another could not see the enclosing
+    // variables. The reference has had them since v0.2. These pin it down.
+    #[test]
+    fn a_function_sees_the_scope_it_was_defined_in() {
+        assert_eq!(
+            shown("विधि बाह्यम्(म) { फलम् विधि(क) { फलम् क + म। }। } \
+                   मानय प = बाह्यम्(१०)(५)।"),
+            "१५");
+    }
+
+    #[test]
+    fn each_closure_keeps_its_own_captured_value() {
+        assert_eq!(
+            shown("विधि योजकः(म) { फलम् विधि(क) { फलम् क + म। }। } \
+                   मानय द्वि = योजकः(२)। मानय दश = योजकः(१०)। \
+                   मानय प = वाक्यम्(द्वि(१)) + \",\" + वाक्यम्(दश(१))।"),
+            "३,११");
+    }
+
+    #[test]
+    fn a_closure_sees_later_changes_to_the_captured_variable() {
+        // true lexical capture, not a snapshot — the reference behaves this way
+        assert_eq!(
+            shown("विधि गणकः() { मानय ग = ०। फलम् विधि() { ग = ग + १। फलम् ग। }। } \
+                   मानय अग्रे = गणकः()। अग्रे()। अग्रे()। मानय प = अग्रे()।"),
+            "३");
+    }
+
+    #[test]
+    fn a_nested_named_function_is_a_closure_too() {
+        assert_eq!(
+            shown("विधि बाह्यम्(म) { विधि आन्तरम्(क) { फलम् क * म। } फलम् आन्तरम्(३)। } \
+                   मानय प = बाह्यम्(७)।"),
+            "२१");
     }
 
     #[test]
