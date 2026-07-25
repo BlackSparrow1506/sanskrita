@@ -1245,7 +1245,6 @@ mod json_tests {
     }
 }
 
-
 // ---- सारणी: CSV, hand-written to RFC 4180 (no crates) ----
 
 fn csv_sep(v: Option<&Value>, line: usize) -> RResult<char> {
@@ -1601,10 +1600,6 @@ fn civil_from_days(z: i64) -> (i64, u32, u32) {
 fn today() -> String {
     let (y, m, d) = civil_from_days((unix_secs() / 86_400) as i64);
     format!("{:04}-{:02}-{:02}", y, m, d)
-}
-
-fn year() -> i64 {
-    civil_from_days((unix_secs() / 86_400) as i64).0
 }
 
 fn clock() -> String {

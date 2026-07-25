@@ -58,6 +58,26 @@ each in its own process — so design §7c is finally honoured rather than claim
 | 18 | Medium | वेगः accepted trailing commas in list and map literals; the reference rejected them. A silent divergence no test had noticed. | Trailing commas are now accepted everywhere a comma-separated list appears, in both engines, and are in the differential harness. |
 | 19 | Medium | `STATUS.md` claimed design §7c's benchmark rule was honoured. `BENCHMARKS.md` carried v0.3 numbers with no वेगः, Java or Rust column. | The claim was corrected first, then made true: `मापनम्.py` rewritten to measure everything present and to write *not measured* — never an estimate — for what is absent. |
 
+## Found by running `cargo test` on the real machine (v0.5.1)
+
+The Rust engine is written here and compiled on Gauri's Mac, so `cargo test` is
+where blind mistakes surface. Three did, and one of them was not a mistake at
+all but a missing feature nobody had noticed.
+
+| # | Severity | Issue | Fix |
+|---|---|---|---|
+| 20 | **High** | **वेगः never supported lambdas.** `विधि(क) { … }` as a *value* — passed to `सू.छानय`, stored in a सूची, returned from a विधि — parsed only in statement position. The reference has had them since v0.3.1, and the slice-6 notes claimed them. Every वेगः test that passed happened to use *named* functions, so nothing caught it: a language feature missing from one engine for two releases. | `Expr::Lambda` added through ast → parser → interp → precheck. Five conformance cases, four differential cases, including closures and lambdas inside collections. |
+| 21 | Medium | My first traceback implementation wrapped `call_function` in a thin outer function so it could append a frame on the way out. That cost **one native stack frame on every call** — and a tree-walker pays for every frame several times over. A 25-deep factorial went over the recursion guard. | Frames are appended only while *unwinding*, so the normal path costs nothing. |
+| 22 | Low | A first attempt at the traceback snapshotted the whole call stack at the innermost frame. That would have given a `प्रयत` sitting half-way up frames from *above* itself, which the reference does not do. Caught by reasoning about the semantics before shipping, not by a test. | Each विधि appends its own frame as the error escapes it — so a catch half-way up sees only what the error actually passed through. Differential case added. |
+
+**Worth writing down:** in a **debug** build one संस्कृता call costs tens of
+kilobytes of native stack — the evaluator is a large recursive function and
+rustc gives every match arm its own slots. So the 1 MB default budget, sized for
+a 2 MB test thread, allows only about twenty-five levels of recursion *in tests*.
+The shipped binary runs on a 256 MB stack with a 192 MB budget, which is why real
+programs recurse thousands deep. Tests that genuinely need depth spawn their own
+thread, as `moderate_recursion_works` and `money_and_bignums` now both do.
+
 ## The new test layer
 
 `यादृच्छिकपरीक्षा.py` generates random valid संस्कृता, runs it on both engines,

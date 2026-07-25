@@ -139,6 +139,14 @@ fn walk_expr(e: &Expr, found: &mut Vec<String>) {
         Expr::List(items, _) => for x in items { walk_expr(x, found); },
         Expr::Map(pairs, _) => for (k, v) in pairs { walk_expr(k, found); walk_expr(v, found); },
         Expr::New(inner, _) => walk_expr(inner, found),
+        Expr::Lambda(params, body, _) => {
+            for p in params {
+                if let Some(d) = &p.default {
+                    walk_expr(d, found);
+                }
+            }
+            walk(body, found);
+        }
         _ => {}
     }
 }

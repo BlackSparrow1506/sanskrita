@@ -122,6 +122,11 @@ pub fn fmt_f64(x: f64) -> String {
     if neg { format!("-{}", out) } else { out }
 }
 
+/// Add the frame of a विधि the error is escaping. Innermost first.
+fn append_frame(raw: String, name: &str, line: usize) -> String {
+    crate::err::SError::decode(&raw).with_frame(name, line).encode()
+}
+
 fn err2(line: usize, sa: &str, en: &str) -> String {
     err2k(line, sa, en, "दोषः")
 }
@@ -684,6 +689,11 @@ impl Interp {
                     },
                 }
             }
+            Expr::Lambda(params, body, _) => Ok(Value::Func(Rc::new(Function {
+                name: "<अनामविधिः>".into(),
+                params: params.clone(),
+                body: body.clone(),
+            }))),
             Expr::New(inner, line) => {
                 // `सृज वर्गः(…)` — the inner expression is the class call
                 match inner.as_ref() {
@@ -896,15 +906,6 @@ impl Interp {
 
     fn call_function(&mut self, f: &Rc<Function>, args: &[Arg], line: usize,
                      self_obj: Option<Rc<Instance>>) -> RResult<Value> {
-        // Every विधि an error escapes appends its own frame, so by the time it
-        // reaches the top we have the whole chain — innermost first.
-        self.call_inner(f, args, line, self_obj).map_err(|e| {
-            crate::err::SError::decode(&e).with_frame(&f.name, line).encode()
-        })
-    }
-
-    fn call_inner(&mut self, f: &Rc<Function>, args: &[Arg], line: usize,
-                  self_obj: Option<Rc<Instance>>) -> RResult<Value> {
         let mut positional: Vec<Value> = Vec::new();
         let mut labeled: Vec<(String, Value)> = Vec::new();
         for a in args {
@@ -993,13 +994,29 @@ impl Interp {
         self.current = saved;
         self.scopes.pop();
 
-        match result? {
+        // Each विधि the error escapes appends its own frame, so the trace holds
+        // exactly the calls it passed through — an error caught by a प्रयत
+        // half-way up does NOT carry the frames above that प्रयत, which is what
+        // the reference engine does too.
+        //
+        // This happens only while unwinding, so it costs no stack on the normal
+        // path. (Wrapping every call in an extra function to do the same thing
+        // cost a frame per call, and a tree-walker pays for every frame twice —
+        // it pushed a 25-deep factorial over the guard.)
+        let flow = match result {
+            Ok(flow) => flow,
+            Err(e) => return Err(append_frame(e, &f.name, line)),
+        };
+
+        match flow {
             Flow::Return(v) => Ok(v),
             Flow::Normal => Ok(Value::Nil),
             _ => Err(err2(line, "'विरम'/'अनुवर्त' चक्रात् बहिः न शक्यम्",
                           "break/continue outside a loop")),
         }
     }
+
+
 
     /// `+` on two already-evaluated values — used by सूचीकर्म.योगः.
     pub fn add_values(&self, a: &Value, b: &Value, line: usize) -> RResult<Value> {
@@ -1471,9 +1488,33 @@ mod tests {
     #[test]
     fn money_and_bignums() {
         assert_eq!(shown("मानय प = ४५०.५० + ३२०.२५ + ५९९.००।"), "१३६९.७५");
-        assert_eq!(
-            shown("विधि फ(म) { यदि (म <= १) { फलम् १। } फलम् म * फ(म - १)। } मानय प = फ(२५)।"),
-            dev_digits("15511210043330985984000000"));
+
+        // २५! is a *bignum* test that happens to recurse 25 deep, so give it a
+        // real stack. Measured on this machine: one संस्कृता call costs tens of
+        // kilobytes of native stack in a DEBUG build (the evaluator is a large
+        // recursive function and rustc gives every match arm its own slots), so
+        // the 1 MB default budget — sized for a 2 MB test thread — allows only
+        // about twenty-five levels. The shipped binary runs on 256 MB with a
+        // 192 MB budget, which is why real programs recurse thousands deep.
+        // Testing recursion depth on a 2 MB test thread was always the
+        // artificial part; see moderate_recursion_works, which does the same.
+        let handle = std::thread::Builder::new()
+            .stack_size(64 * 1024 * 1024)
+            .spawn(|| {
+                let src = "विधि फ(म) { यदि (म <= १) { फलम् १। } फलम् म * फ(म - १)। } \
+                           मानय प = फ(२५)।";
+                let toks = lex(src).unwrap();
+                let stmts = Parser::new(toks).program().unwrap();
+                let mut it = Interp::new().with_limits(1_000_000, 48 * 1024 * 1024);
+                it.run(&stmts).map_err(|e| crate::err::render(&e))?;
+                match it.scopes[0].vars.get("प") {
+                    Some(Value::Int(n)) => Ok(n.to_string_signed()),
+                    other => Err(format!("unexpected value: {:?}", other)),
+                }
+            })
+            .unwrap();
+        let n: Result<String, String> = handle.join().expect("thread must not crash");
+        assert_eq!(n.unwrap(), "15511210043330985984000000");
     }
 
     // ---- slice 6: collections ----

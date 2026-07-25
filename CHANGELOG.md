@@ -11,6 +11,15 @@ them is listed under **Breaking** below.
 
 ## [Unreleased]
 
+### Fixed
+
+- **वेगः never supported lambdas.** `विधि(क) { … }` used as a *value* — passed
+  to `सू.छानय`, stored in a सूची, returned from a विधि — worked in the reference
+  engine but was a parse error in वेगः. It had been missing since lambdas
+  landed in v0.3.1, and no test caught it because every वेगः test happened to
+  use named functions. Now implemented, with conformance and differential cases
+  covering closures and lambdas inside collections.
+
 ### Added
 
 - **`गणितम्.परिवृत्त(x, स्थानानि)`** — round to a fixed number of decimal places,

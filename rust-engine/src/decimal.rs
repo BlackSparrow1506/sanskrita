@@ -57,15 +57,6 @@ impl Decimal {
         self.unscaled.is_zero()
     }
 
-    pub fn to_bigint_if_integral(&self) -> Option<BigInt> {
-        if self.scale == 0 {
-            return Some(self.unscaled.clone());
-        }
-        let p = BigInt::from_i64(1).mul_pow10(self.scale);
-        let (q, r) = self.unscaled.divmod_trunc(&p)?;
-        if r.is_zero() { Some(q) } else { None }
-    }
-
     /// Rescale both operands to a common scale.
     fn align(a: &Decimal, b: &Decimal) -> (BigInt, BigInt, usize) {
         let scale = a.scale.max(b.scale);

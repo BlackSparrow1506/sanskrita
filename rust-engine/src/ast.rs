@@ -46,6 +46,8 @@ pub enum Expr {
     Attr(Box<Expr>, String, usize),
     /// `सृज वर्गः(…)`
     New(Box<Expr>, usize),
+    /// An anonymous विधि used as a value: `विधि(क) { फलम् क * २। }`
+    Lambda(Vec<Param>, Vec<Stmt>, usize),
 }
 
 /// Assignment targets: a name, an index, or an attribute.

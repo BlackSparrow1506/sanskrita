@@ -526,6 +526,13 @@ impl Parser {
             self.eat_op("]")?;
             return Ok(Expr::List(items, line));
         }
+        // lambda — an anonymous विधि used as a value
+        if self.is_kw("विधि") {
+            self.advance();
+            let params = self.param_list()?;
+            let body = self.block()?;
+            return Ok(Expr::Lambda(params, body, line));
+        }
         // map literal
         if self.is_op("{") {
             self.advance();
