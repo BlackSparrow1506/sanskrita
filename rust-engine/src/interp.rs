@@ -123,8 +123,12 @@ pub fn fmt_f64(x: f64) -> String {
 }
 
 fn err2(line: usize, sa: &str, en: &str) -> String {
-    format!("दोषः पङ्क्तौ {} — {}\nError at line {} — {}",
-            dev_digits(&line.to_string()), sa, line, en)
+    err2k(line, sa, en, "दोषः")
+}
+
+/// Same, but naming the kind so a program can branch on it.
+fn err2k(line: usize, sa: &str, en: &str, kind: &str) -> String {
+    crate::err::SError::new(line, sa, en, kind).encode()
 }
 
 impl Interp {
@@ -201,11 +205,11 @@ impl Interp {
             if nullable {
                 return Ok(());
             }
-            return Err(err2(line,
+            return Err(err2k(line,
                 &format!("'{}' शून्यं न स्वीकरोति — घोषणे '?' प्रयुज्यताम् \
                           (मानय {}? : {} = शून्यम्।)", name, name, typename),
                 &format!("'{}' cannot hold शून्यम् — declare it nullable with '?' \
-                          (मानय {}? : {} = शून्यम्।)", name, name, typename)));
+                          (मानय {}? : {} = शून्यम्।)", name, name, typename), "प्रकारदोषः"));
         }
         let ok = match typename {
             "पूर्णाङ्कः"   => matches!(v, Value::Int(_)),
@@ -218,11 +222,12 @@ impl Interp {
             _ => true,   // unknown type names are not enforced (yet)
         };
         if !ok {
-            return Err(err2(line,
+            return Err(err2k(line,
                 &format!("प्रकारदोषः — '{}' {} इति घोषितम्, {} प्राप्तम्",
                          name, typename, v.type_name()),
                 &format!("type error — '{}' is declared {}, got {}",
-                         name, typename, v.type_name())));
+                         name, typename, v.type_name()),
+                "प्रकारदोषः"));
         }
         Ok(())
     }
@@ -394,29 +399,29 @@ impl Interp {
                     &format!("unknown module '{}'", canon)))
             }
             Stmt::Throw { expr, line } => {
-                // `क्षिप "सन्देशः"।` — same message on both sides, matching the
-                // reference (SanskritaError(line, text, text)).
                 let v = self.eval(expr)?;
+                if let Value::Err(e) = &v {
+                    // क्षिप त्रु। — re-raise exactly what was caught, trace and all
+                    return Err(e.encode());
+                }
                 let text = match &v {
                     Value::Str(s) => s.clone(),
                     other => self.display(other),
                 };
-                Err(err2(*line, &text, &text))
+                Err(err2k(*line, &text, &text, "स्वयंदोषः"))
             }
             Stmt::Try { body, err_name, catch, line: _ } => {
                 match self.exec_block(body) {
                     Ok(flow) => Ok(flow),
                     Err(msg) => {
-                        // Bind only the Sanskrit MESSAGE — not the "दोषः पङ्क्तौ N — "
-                        // prefix and not the English line — matching the reference,
-                        // which stores err.sa.
-                        let first = msg.lines().next().unwrap_or(&msg);
-                        let sa = match first.split_once(" — ") {
-                            Some((_, rest)) => rest.to_string(),
-                            None => first.to_string(),
-                        };
+                        // The catch name binds an error VALUE: it prints as its
+                        // Sanskrit message (so वद(त्रु) reads as it always did)
+                        // but also answers .सन्देशः .पङ्क्तिः .प्रकारः .अनुरेखा
+                        // and can be re-raised with क्षिप.
+                        let e = crate::err::SError::decode(&msg);
                         let cur = self.current;
-                        self.scopes[cur].vars.insert(err_name.clone(), Value::Str(sa));
+                        self.scopes[cur].vars
+                            .insert(err_name.clone(), Value::Err(Rc::new(e)));
                         self.exec_block(catch)
                     }
                 }
@@ -533,10 +538,11 @@ impl Interp {
         };
         let i = b.to_i64().unwrap_or(i64::MAX);
         if i < 1 || i as usize > len {
-            return Err(err2(line,
+            return Err(err2k(line,
                 &format!("स्थानाङ्कः {} सीमाबहिः (१..{})",
                          dev_digits(&i.to_string()), dev_digits(&len.to_string())),
-                &format!("index {} out of range (1..{}) — संस्कृता counts from १", i, len)));
+                &format!("index {} out of range (1..{}) — संस्कृता counts from १", i, len),
+                "सीमादोषः"));
         }
         Ok(i as usize)
     }
@@ -556,9 +562,10 @@ impl Interp {
             Expr::Nil => Ok(Value::Nil),
             Expr::Var(name, line) => match self.lookup(name) {
                 Some(v) => Ok(v.clone()),
-                None => Err(err2(*line,
+                None => Err(err2k(*line,
                     &format!("अज्ञातं नाम '{}'", name),
-                    &format!("unknown name '{}'", name))),
+                    &format!("unknown name '{}'", name),
+                    "नामदोषः")),
             },
             Expr::List(items, _) => {
                 let mut out = Vec::with_capacity(items.len());
@@ -636,6 +643,22 @@ impl Interp {
                                 &format!("module '{}' has no '{}'", m, name)))
                         }
                     }
+                    Value::Err(e) => match name.as_str() {
+                        "सन्देशः" => Ok(Value::Str(e.sa.clone())),
+                        "आङ्ग्लसन्देशः" => Ok(Value::Str(e.en.clone())),
+                        "पङ्क्तिः" => Ok(Value::int(e.line as i64)),
+                        "प्रकारः" => Ok(Value::Str(e.kind.clone())),
+                        "अनुरेखा" => Ok(Value::list(e.trace.iter().rev()
+                            .map(|(n, l)| Value::Str(format!("{} ({})",
+                                n, dev_digits(&l.to_string()))))
+                            .collect())),
+                        _ => Err(err2(*line,
+                            &format!("दोषे '{}' नास्ति — सन्देशः, आङ्ग्लसन्देशः, \
+                                      पङ्क्तिः, प्रकारः, अनुरेखा", name),
+                            &format!("an error has no '{}' — it has सन्देशः, \
+                                      आङ्ग्लसन्देशः, पङ्क्तिः, प्रकारः, अनुरेखा",
+                                     name))),
+                    },
                     Value::UserModule(map, mname) => {
                         match map.borrow().get(name) {
                             Some(v) => Ok(v.clone()),
@@ -747,11 +770,12 @@ impl Interp {
                         if !lv.is_number() || !rv.is_number() {
                             let mixed = matches!(&lv, Value::Str(_)) || matches!(&rv, Value::Str(_));
                             return Err(if mixed {
-                                err2(*line,
+                                err2k(*line,
                                     "वाक्यं सङ्ख्या च न मिश्रणीये — 'वाक्यम्()' प्रयुज्यताम्",
-                                    "cannot mix text and number — convert with वाक्यम्()")
+                                    "cannot mix text and number — convert with वाक्यम्()",
+                                    "प्रकारदोषः")
                             } else {
-                                err2(*line, "सङ्ख्ये अपेक्षिते", "expected numbers")
+                                err2k(*line, "सङ्ख्ये अपेक्षिते", "expected numbers", "प्रकारदोषः")
                             });
                         }
                         self.num_arith(op, &lv, &rv, *line)
@@ -872,6 +896,15 @@ impl Interp {
 
     fn call_function(&mut self, f: &Rc<Function>, args: &[Arg], line: usize,
                      self_obj: Option<Rc<Instance>>) -> RResult<Value> {
+        // Every विधि an error escapes appends its own frame, so by the time it
+        // reaches the top we have the whole chain — innermost first.
+        self.call_inner(f, args, line, self_obj).map_err(|e| {
+            crate::err::SError::decode(&e).with_frame(&f.name, line).encode()
+        })
+    }
+
+    fn call_inner(&mut self, f: &Rc<Function>, args: &[Arg], line: usize,
+                  self_obj: Option<Rc<Instance>>) -> RResult<Value> {
         let mut positional: Vec<Value> = Vec::new();
         let mut labeled: Vec<(String, Value)> = Vec::new();
         for a in args {
@@ -978,7 +1011,7 @@ impl Interp {
                 Ok(Value::list(out))
             }
             _ if a.is_number() && b.is_number() => self.num_arith("+", a, b, line),
-            _ => Err(err2(line, "सङ्ख्ये अपेक्षिते", "expected numbers")),
+            _ => Err(err2k(line, "सङ्ख्ये अपेक्षिते", "expected numbers", "प्रकारदोषः")),
         }
     }
 
@@ -992,11 +1025,11 @@ impl Interp {
 
     /// द्रुतदशमांशः arithmetic — plain IEEE-754, no rounding tricks.
     fn flt_arith(&self, op: &str, lv: &Value, rv: &Value, line: usize) -> RResult<Value> {
-        let bad = || err2(line, "सङ्ख्ये अपेक्षिते", "expected numbers");
+        let bad = || err2k(line, "सङ्ख्ये अपेक्षिते", "expected numbers", "प्रकारदोषः");
         let a = lv.as_f64().ok_or_else(bad)?;
         let b = rv.as_f64().ok_or_else(bad)?;
         if (op == "/" || op == "%") && b == 0.0 {
-            return Err(err2(line, "शून्येन भागो न शक्यः", "division by zero"));
+            return Err(err2k(line, "शून्येन भागो न शक्यः", "division by zero", "गणितदोषः"));
         }
         Ok(Value::Flt(match op {
             "+" => a + b,
@@ -1010,7 +1043,7 @@ impl Interp {
 
     /// Exact numeric arithmetic (see slice 5).
     fn num_arith(&self, op: &str, lv: &Value, rv: &Value, line: usize) -> RResult<Value> {
-        let div_zero = || err2(line, "शून्येन भागो न शक्यः", "division by zero");
+        let div_zero = || err2k(line, "शून्येन भागो न शक्यः", "division by zero", "गणितदोषः");
         if let (Value::Int(a), Value::Int(b)) = (lv, rv) {
             return match op {
                 "+" => Ok(Value::Int(a.add(b))),
@@ -1043,17 +1076,8 @@ impl Interp {
             "-" => a.sub(&b),
             "*" => a.mul(&b),
             "/" => a.div(&b, DIV_DIGITS).ok_or_else(div_zero)?,
-            "%" => {
-                if b.is_zero() {
-                    return Err(div_zero());
-                }
-                let q = a.div(&b, 0).ok_or_else(div_zero)?;
-                let floor_q = match q.to_bigint_if_integral() {
-                    Some(i) => Decimal::from_bigint(i),
-                    None => q,
-                };
-                a.sub(&floor_q.mul(&b))
-            }
+            // exact, floored, no precision ceiling — see Decimal::rem_floor
+            "%" => a.rem_floor(&b).ok_or_else(div_zero)?,
             _ => return Err("आन्तरिकदोषः / internal error".into()),
         };
         Ok(Value::Dec(out))
@@ -1127,6 +1151,7 @@ impl Interp {
             Value::UserModule(_, name) => format!("<कोष्ठकम् {}>", name),
             Value::Native(m, f) => format!("<विधिः {}.{}>", m, f),
             Value::BoundNative(recv, _, f) => format!("<विधिः {}.{}>", recv.type_name(), f),
+            Value::Err(e) => e.sa.clone(),   // so वद(त्रु) reads as it always did
         }
     }
 
@@ -1916,5 +1941,90 @@ mod tests {
         assert_eq!(fmt_f64(2.0 / 3.0), "0.6666666666666666");
         assert_eq!(fmt_f64(1e17), "1e+17");
         assert_eq!(fmt_f64(1e-7), "1e-07");
+    }
+
+    // ---- Tier 1: errors are values, and they remember where they came from ----
+
+    fn caught(src: &str) -> String {
+        shown(src)
+    }
+
+    #[test]
+    fn money_rounding_and_padding() {
+        assert_eq!(shown("आनय \"गणितम्\" इति ग। मानय प = ग.परिवृत्त(११२७२७.२७२७२७, २)।"),
+                   "११२७२७.२७");
+        assert_eq!(shown("आनय \"गणितम्\" इति ग। मानय प = ग.परिवृत्त(२.५)।"), "३");
+        assert_eq!(shown("आनय \"गणितम्\" इति ग। मानय प = ग.परिवृत्त(०-२.५)।"), "-३");
+        assert_eq!(shown("आनय \"गणितम्\" इति ग। मानय प = ग.परिवृत्त(१००, २)।"), "१००.००");
+        assert_eq!(shown("आनय \"वाक्यकर्म\" इति वाक। \
+                          मानय प = \"[\" + वाक.पूरय(\"क\", ५) + \"]\"।"),
+                   "[क    ]");
+        assert_eq!(shown("आनय \"वाक्यकर्म\" इति वाक। \
+                          मानय प = \"[\" + वाक.पूरय(\"क\", ०-५) + \"]\"।"),
+                   "[    क]");
+    }
+
+    #[test]
+    fn an_error_knows_its_kind() {
+        assert_eq!(caught("मानय प = \"\"। प्रयत { वद(१/०)। } \
+                           दोषे (त्रु) { प = त्रु.प्रकारः। }"), "गणितदोषः");
+        assert_eq!(caught("मानय प = \"\"। प्रयत { वद(अनुपस्थितम्)। } \
+                           दोषे (त्रु) { प = त्रु.प्रकारः। }"), "नामदोषः");
+        assert_eq!(caught("मानय प = \"\"। प्रयत { मानय स = [१]। वद(स[९])। } \
+                           दोषे (त्रु) { प = त्रु.प्रकारः। }"), "सीमादोषः");
+        assert_eq!(caught("मानय प = \"\"। प्रयत { क्षिप \"मम\"। } \
+                           दोषे (त्रु) { प = त्रु.प्रकारः। }"), "स्वयंदोषः");
+    }
+
+    #[test]
+    fn an_error_still_prints_as_its_message() {
+        // old code that just does वद(त्रु) must be unaffected
+        assert_eq!(caught("मानय प = \"\"। प्रयत { क्षिप \"मम दोषः\"। } \
+                           दोषे (त्रु) { प = त्रु। }"), "मम दोषः");
+        assert_eq!(caught("मानय प = \"\"। प्रयत { क्षिप \"x\"। } \
+                           दोषे (त्रु) { प = प्रकारः(त्रु)। }"), "दोषः");
+    }
+
+    #[test]
+    fn an_error_carries_its_line_and_both_messages() {
+        assert_eq!(caught("मानय प = ०। प्रयत { वद(१/०)। } \
+                           दोषे (त्रु) { प = त्रु.पङ्क्तिः। }"), "१");
+        assert_eq!(caught("मानय प = \"\"। प्रयत { वद(१/०)। } \
+                           दोषे (त्रु) { प = त्रु.आङ्ग्लसन्देशः। }"),
+                   "division by zero");
+    }
+
+    #[test]
+    fn a_traceback_names_every_function_it_escaped() {
+        assert_eq!(
+            caught("विधि अ() { फलम् ब()। } विधि ब() { फलम् १/०। } \
+                    मानय प = \"\"। प्रयत { अ()। } दोषे (त्रु) { प = त्रु.अनुरेखा। }"),
+            "[\"अ (१)\", \"ब (१)\"]");
+    }
+
+    #[test]
+    fn re_raising_preserves_everything() {
+        assert_eq!(
+            caught("विधि क() { प्रयत { वद(१/०)। } दोषे (त्रु) { क्षिप त्रु। } } \
+                    मानय प = \"\"। प्रयत { क()। } दोषे (त्रु) { प = त्रु.प्रकारः। }"),
+            "गणितदोषः");
+    }
+
+    #[test]
+    fn asking_an_error_for_something_it_lacks_is_an_error() {
+        let e = run_ok("प्रयत { क्षिप \"x\"। } दोषे (त्रु) { वद(त्रु.किमपि)। }")
+            .unwrap_err();
+        assert!(crate::err::render(&e).contains("नास्ति"), "{}", e);
+    }
+
+    // an uncaught error renders with the whole chain
+    #[test]
+    fn uncaught_errors_render_the_traceback() {
+        let e = run_ok("विधि अ() { फलम् ब()। } विधि ब() { फलम् १/०। } अ()।")
+            .unwrap_err();
+        let text = crate::err::render(&e);
+        assert!(text.contains("अनुरेखा"), "{}", text);
+        assert!(text.find("अ'").unwrap() < text.find("ब'").unwrap(),
+                "outermost frame first:\n{}", text);
     }
 }

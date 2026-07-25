@@ -1,0 +1,28 @@
+# संस्कृता deliberately runs with almost no dependencies:
+#   · वेगः (rust-engine) has ZERO external crates — bignums, decimals and NFC
+#     are hand-written. `cargo tree` showing anything else is worth an issue.
+#   · the reference engine uses only the Python standard library.
+# So dependabot is here mainly to keep CI actions current, and to tell us
+# immediately if a dependency ever appears where there should be none.
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    commit-message:
+      prefix: "ci"
+
+  - package-ecosystem: "cargo"
+    directory: "/rust-engine"
+    schedule:
+      interval: "monthly"
+    commit-message:
+      prefix: "veg"
+
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    commit-message:
+      prefix: "chore"

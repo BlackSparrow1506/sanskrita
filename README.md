@@ -1,4 +1,4 @@
-# ॐ संस्कृता (Sanskrita) v0.4 — फलम् (Phase 3 complete)
+# ॐ संस्कृता (Sanskrita) v0.5 — फलम् (Phase 3 complete)
 
 The Sanskrit programming language: Devanagari keywords, Pāṇinian kāraka
 arguments, exact decimal arithmetic, and a native Rust engine.
@@ -10,6 +10,9 @@ program; `तुल्यता.py` is what enforces that, on every push.
 
 📋 **[STATUS.md](STATUS.md)** — every design promise for Phases 1–3, with an
 honest verdict: shipped, partial, or deferred (and to which phase).
+📐 **[docs/GRAMMAR.md](docs/GRAMMAR.md)** — the complete formal grammar ·
+🔒 **[docs/STABILITY.md](docs/STABILITY.md)** — what we promise not to break ·
+📝 **[CHANGELOG.md](CHANGELOG.md)**
 Website: enable GitHub Pages → `docs/`. CI runs `परीक्षा.py` on every push.
 
 **हिन्दी में पढ़ें:** [docs/README.hi.md](docs/README.hi.md) ·
@@ -56,12 +59,17 @@ python playground.py
 **Verify your install:**
 
 ```bash
-python3 परीक्षा.py          # conformance — should end with सर्वं शुद्धम् ✓
-python3 तुल्यता.py          # both engines, byte-identical output required
+python3 परीक्षा.py             # conformance — should end with सर्वं शुद्धम् ✓
+python3 तुल्यता.py             # both engines, byte-identical output required
+python3 यादृच्छिकपरीक्षा.py    # random programs — both engines must agree
 cd rust-engine && cargo test  # वेगः unit tests
 ```
 
-**New to संस्कृता?** Start with `docs/TUTORIAL.md` — your first 10 programs in an hour. Read `docs/AI-SPEC.md` — or paste it into any AI assistant and it becomes your संस्कृता tutor. Design patterns guide: `docs/अभिकल्पनप्रतिमानानि.md`. License: MIT. Contributions: see `CONTRIBUTING.md`.
+Four layers, all in CI. The last one generates programs nobody wrote: it found
+two real bugs in exact-decimal arithmetic on its first run.
+
+**New to संस्कृता?** Start with `docs/TUTORIAL.md` — your first 10 programs in an hour. Read `docs/AI-SPEC.md` — or paste it into any AI assistant and it becomes your संस्कृता tutor. Design patterns guide: `docs/अभिकल्पनप्रतिमानानि.md`. License: MIT. Contributions: see `CONTRIBUTING.md` and `CODE_OF_CONDUCT.md`.
+Security: `SECURITY.md` (please do not open a public issue).
 
 ## Phase 1 features
 
@@ -171,18 +179,82 @@ uses it.
 - `सं.रोमनय(text)` — Devanagari → IAST; `सं.देवनागरय(text)` — IAST → Devanagari
 - `सं.संधय(a, b)` — vowel sandhi joining (dīrgha, guṇa, vṛddhi, yaṇ, avagraha)
 
+## Real programs — and both engines give the same answer
+
+These are not demos that print things. Each one is a job somebody actually has
+to do, and each runs on the **native वेगः engine** as well as the reference one,
+byte for byte — `तुल्यता.py` checks that on every push.
+
+| Example | The job | What it leans on |
+|---|---|---|
+| `examples/वेतनपत्रम्.सं` | **payroll run** — prorated salary, PF, slab tax, rejected rows with reasons, CSV + JSON out, audit digest | exact `दशमांशः`, `ग.परिवृत्त` to the paisa, `सारणी`, `जेसन`, `गूढ`, error kinds |
+| `examples/लेखापरीक्षा.सं` | **server log triage** — parse, group by level, slowest requests, per-route averages | `वाक्यकर्म`, `सूचीकर्म.क्रमय` with a key, `कालः`, `लेखनी` |
+| `examples/आदेशसाधनम्.सं` | **a CLI utility** you could put in a cron job — arguments, env var, stdout report, stderr complaints, real exit codes | `आदेशचराः`, `परिवेशः`, `सञ्चिका`, `लेखनी` |
+| `examples/कोशागारम्.सं` | CSV in → validate → exact money → fingerprint → CSV out | most of the standard library at once |
+| `examples/दोषविवरणम्.सं` | what an error *is* here, and how to branch on it | error objects, kinds, tracebacks |
+
+```bash
+sanskrita       examples/वेतनपत्रम्.सं     # reference engine
+sanskrita --veg examples/वेतनपत्रम्.सं     # native engine — identical output
+```
+
+The payroll one is worth reading if you only read one. Totals reconcile to the
+paisa because every money value is rounded exactly once, where it becomes
+money — and because a `दशमांशः` never passed through a float on the way in from
+the CSV or out to the JSON.
+
+## Errors you can work with
+
+```
+प्रयत {
+    वेतनगणना(कर्मी)।
+} दोषे (त्रु) {
+    यदि (त्रु.प्रकारः == "गणितदोषः") { वद("शून्येन भागः")। }
+    अन्यथा { क्षिप त्रु। }          # यत् न जानीमः तत् न गिलामः
+}
+```
+
+An error is a value: `त्रु.सन्देशः`, `त्रु.आङ्ग्लसन्देशः`, `त्रु.पङ्क्तिः`,
+`त्रु.प्रकारः`, `त्रु.अनुरेखा`. It still prints as its message, so old code is
+unaffected — but now you can branch on the **kind**, log the details, or
+re-raise it unchanged.
+
+Uncaught, it prints the whole chain rather than one line:
+
+```
+दोषः पङ्क्तौ ६० — शून्येन भागो न शक्यः
+Error at line 60 — division by zero
+
+अनुरेखा (नवीनतमम् आह्वानम् अन्ते) / traceback (most recent call last):
+    विधि 'वेतनम्' — पङ्क्तिः ६३
+    विधि 'करः' — पङ्क्तिः ५८
+    विधि 'प्रतिशतम्' — पङ्क्तिः ५९
+    → पङ्क्तिः ६०: शून्येन भागो न शक्यः
+```
+
+See `examples/दोषविवरणम्.सं`.
+
 ## Standard library at a glance
 
 ```
-आनय "गणितम्"     इति ग।    # वर्गमूलम्, घातः, ज्या, कोज्या, तलम्, पाई, ई …
-आनय "वाक्यकर्म"  इति व।    # विभज, संयोजय, खोज, प्रतिस्थापय, अंश, उच्च, परिष्कार …
-आनय "सूचीकर्म"   इति सू।   # छानय, प्रतिचित्रय, न्यूनीकरण, योगः, महत्तमम्, अद्वितीयम् …
+आनय "गणितम्"     इति ग।    # वर्गमूलम्, घातः, ज्या, कोज्या, तलम्, परिवृत्त, पाई, ई …
+आनय "वाक्यकर्म"  इति वाक।  # विभज, संयोजय, खोज, प्रतिस्थापय, उच्च, आकारय, पूरय …
+आनय "सूचीकर्म"   इति सू।   # छानय, प्रतिचित्रय, न्यूनीकरण, क्रमय, योगः, सङ्गमः …
 आनय "सञ्चिका"    इति स।    # पठ, लिख, योजय, अस्ति, निष्कासय, पङ्क्तयः, सूचिका
 आनय "जेसन"       इति ज।    # विश्लेषय, पाठय
-आनय "कालः"       इति का।   # अद्य, संप्रति, वर्षः, क्षणविरामः
+आनय "सारणी"      इति सा।   # CSV: विश्लेषय, कोशाः, पाठय
+आनय "कालः"       इति का।   # अद्य, वासरः, दिनयोगः, अन्तरम्, रूपय, शुद्धः, अधिवर्षः …
+आनय "नियमितम्"   इति नि।   # regex: मेलति, खोज, सर्वाणि, प्रतिस्थापय, समूहाः …
+आनय "गूढ"        इति गू।   # सङ्क्षेपः (SHA-256), एकाकी (UUID), गूढय/प्रकटय (base64)
+आनय "परिवेशः"    इति प।    # चरः, चराः, निर्गम, दोषवद, कार्यसूचिका, मञ्चः
+आनय "लेखनी"      इति ले।   # logging: विवरणम्, सूचना, चेतावनी, दोषः, महादोषः
 आनय "यादृच्छिकम्" इति य।    # अन्तरे, वरय, भिन्नम्
 आनय "संस्कृतम्"   इति सं।   # अक्षराणि, मात्राः, छन्दः, रोमनय, देवनागरय, संधय
 ```
+
+See `examples/कोशागारम्.सं` — one program that reads a CSV, validates the dates,
+computes exact money, fingerprints the result and writes it back out, using
+nothing outside the standard library.
 
 Reserved-word note: `न`, `फलम्`, `इति` etc. are keywords — don't use them as variable names (the engine will tell you if you do).
 

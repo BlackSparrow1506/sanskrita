@@ -80,7 +80,7 @@ fn main() {
     match handle.join() {
         Ok(Ok(())) => {}
         Ok(Err(e)) => {
-            eprintln!("{}", e);
+            eprintln!("{}", err::render(&e));
             process::exit(1);
         }
         Err(_) => {
@@ -137,7 +137,7 @@ fn repl() {
                 else { Err(precheck::report(&problems)) }
             });
         if let Err(e) = result {
-            println!("{}", e);
+            println!("{}", err::render(&e));
         }
     }
 }

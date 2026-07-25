@@ -5,6 +5,68 @@ original slice 1–3 audit that established the method.*
 
 ---
 
+# 0. Enterprise-readiness audit (v0.5.0, 25 July 2026)
+
+Question asked: *is this industrial and enterprise ready?* Answer at the time:
+no — and here is exactly why. Three tiers of gaps were found and closed.
+
+## Tier 1 — errors (the largest gap)
+
+An uncaught error printed **one line**: the innermost one. In a five-deep call
+chain that is true and useless. And `दोषे (त्रु)` bound a plain `वाक्यम्`, so a
+program could not tell a division by zero from a missing file, could not read
+the line number, and could not re-raise what it did not understand.
+
+Fixed in both engines: errors carry a **kind**, a line, both messages and a
+**call stack**; `दोषे` binds a value that still *prints* as its message (so no
+existing program changed) but answers `.सन्देशः .आङ्ग्लसन्देशः .पङ्क्तिः
+.प्रकारः .अनुरेखा`; `क्षिप त्रु।` re-raises unchanged.
+
+Implementation note worth remembering: the वेगः error channel is
+`Result<_, String>` at over a hundred sites. Rather than refactor all of them,
+`err.rs` **encodes** the structure into that string with a marker no source file
+contains, and decodes at the three places that need it — प्रयत, the call
+boundary, and the top level. Eight touch points instead of a hundred and twenty.
+
+## Tier 2 — the standard library people actually need
+
+`कालः` was four functions with no arithmetic; there was no regex, no CSV, no
+hashing, no environment access, no logging. Added: `कालः` as a real date
+library, `सारणी` (CSV, RFC 4180), `गूढ` (SHA-256, UUID, base64), `परिवेशः`
+(env, exit codes, stderr), `लेखनी` (logging), plus `सूचीकर्म.क्रमय` with a key
+function, set operations, and `वाक्यकर्म.आकारय`.
+
+**`नियमितम्` (regex) is reference-engine only, and वेगः says so.** वेगः has no
+external crates by design, and a hand-written engine that was not byte-identical
+to Python's `re` would make the same pattern mean two things. An honest gap beats
+a silent divergence. Tracked as the next वेगः slice.
+
+## Tier 3 — the things a serious project has
+
+`SECURITY.md`, `CODE_OF_CONDUCT.md`, `CHANGELOG.md`, issue and PR templates,
+dependabot, `docs/GRAMMAR.md` (the full EBNF), `docs/STABILITY.md` (versioning,
+the frozen decisions, the v1.0 checklist), and a rewritten `मापनम्.py` that
+measures both engines against Python, Java, Rust and C — time **and** peak RSS,
+each in its own process — so design §7c is finally honoured rather than claimed.
+
+## Issues found and fixed in this pass
+
+| # | Severity | Issue | Fix |
+|---|---|---|---|
+| 16 | **High** | Decimal `+`, `-`, `*` in the reference engine were silently rounded to 28 significant digits by Python's default context. `१०५९२७०२७९०६७५४१३१७७२७०००४.३३३३ + ०.०००१` lost the addend — the language's headline promise, false above 28 digits. वेगः was already correct, so this was a divergence too. | Exact at any size, in both engines. Found by the new property tester. |
+| 17 | **High** | Decimal `%` raised an unhandled `decimal.InvalidOperation` on large operands — an engine crash, not a संस्कृता error. वेगः computed it as `a - floor(a/b)*b`, which depends on how the division rounds. | Both engines now take the floored remainder on the **unscaled integers**: no precision ceiling, no rounding step. `(०-७.५) % ३` is `१.५`. |
+| 18 | Medium | वेगः accepted trailing commas in list and map literals; the reference rejected them. A silent divergence no test had noticed. | Trailing commas are now accepted everywhere a comma-separated list appears, in both engines, and are in the differential harness. |
+| 19 | Medium | `STATUS.md` claimed design §7c's benchmark rule was honoured. `BENCHMARKS.md` carried v0.3 numbers with no वेगः, Java or Rust column. | The claim was corrected first, then made true: `मापनम्.py` rewritten to measure everything present and to write *not measured* — never an estimate — for what is absent. |
+
+## The new test layer
+
+`यादृच्छिकपरीक्षा.py` generates random valid संस्कृता, runs it on both engines,
+and demands identical output and no crashes, shrinking any failure to the
+smallest reproducing program. **It found issues 16 and 17 on its first run** —
+after four layers of hand-written tests had passed. It is now in CI.
+
+---
+
 # 1. Phase-3 completion audit (v0.4.0, 25 July 2026)
 
 Method, unchanged from slice 3: read the design document promise by promise,

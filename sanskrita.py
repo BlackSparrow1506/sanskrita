@@ -34,11 +34,11 @@ import importlib
 import os
 import sys
 import unicodedata
-from decimal import Decimal
+from decimal import Decimal, localcontext
 
 sys.setrecursionlimit(4000)
 
-VERSION = "0.4.0"
+VERSION = "0.5.0"
 
 # arguments passed to the running program (आदेशचराः)
 PROGRAM_ARGS: list = []
@@ -191,15 +191,82 @@ def hint_for(word, extra=()):
 
 # ---------------------------------------------------------------- errors
 
+# The kinds of error a program can catch and branch on. Keeping this list
+# short and stable matters more than being exhaustive: a program that says
+# `यदि (त्रु.प्रकारः == "गणितदोषः")` must keep working across releases.
+ERROR_KINDS = {
+    "दोषः",          # anything not more specifically classified
+    "नामदोषः",       # an unknown name
+    "प्रकारदोषः",     # wrong type, or text mixed with numbers
+    "गणितदोषः",      # division by zero and friends
+    "सीमादोषः",      # index or key out of range
+    "व्याकरणदोषः",    # the source could not be parsed
+    "आयातदोषः",      # an import that could not be resolved
+    "स्वयंदोषः",      # raised by the program itself with क्षिप
+}
+
+
 class SanskritaError(Exception):
-    """Bilingual runtime/syntax error."""
-    def __init__(self, line, sa, en):
+    """A bilingual error, with a kind and a call stack.
+
+    `trace` is filled in as the error travels outwards: each विधि it escapes
+    appends its own frame, so the innermost failure ends up first and the
+    outermost call last. Without this, an error in a five-deep call chain told
+    you only the innermost line — true, and almost useless.
+    """
+    def __init__(self, line, sa, en, kind="दोषः", trace=None):
         self.line = line
         self.sa = sa
         self.en = en
-        msg = (f"दोषः पङ्क्तौ {to_dev_digits(str(line))} — {sa}\n"
-               f"Error at line {line} — {en}")
-        super().__init__(msg)
+        self.kind = kind if kind in ERROR_KINDS else "दोषः"
+        self.trace = list(trace) if trace else []
+        super().__init__(self.render())
+
+    def render(self):
+        msg = (f"दोषः पङ्क्तौ {to_dev_digits(str(self.line))} — {self.sa}\n"
+               f"Error at line {self.line} — {self.en}")
+        if self.trace:
+            lines = ["", "अनुरेखा (नवीनतमम् आह्वानम् अन्ते) / "
+                         "traceback (most recent call last):"]
+            for name, ln in reversed(self.trace):
+                lines.append(f"    विधि '{name}' — पङ्क्तिः "
+                             f"{to_dev_digits(str(ln))}")
+            lines.append(f"    → पङ्क्तिः {to_dev_digits(str(self.line))}: "
+                         f"{self.sa}")
+            msg += "\n" + "\n".join(lines)
+        return msg
+
+    def __str__(self):
+        return self.render()
+
+
+class SError:
+    """The value बound by `दोषे (त्रु)`.
+
+    It prints as its Sanskrit message, so `वद(त्रु)` reads exactly as it did
+    before this existed — but now you can also ask it questions:
+        त्रु.सन्देशः  त्रु.आङ्ग्लसन्देशः  त्रु.पङ्क्तिः  त्रु.प्रकारः  त्रु.अनुरेखा
+    and re-raise it unchanged with `क्षिप त्रु।`.
+    """
+    __slots__ = ("err",)
+    FIELDS = ("सन्देशः", "आङ्ग्लसन्देशः", "पङ्क्तिः", "प्रकारः", "अनुरेखा")
+
+    def __init__(self, err):
+        self.err = err
+
+    def get(self, name):
+        e = self.err
+        if name == "सन्देशः":
+            return e.sa
+        if name == "आङ्ग्लसन्देशः":
+            return e.en
+        if name == "पङ्क्तिः":
+            return e.line
+        if name == "प्रकारः":
+            return e.kind
+        if name == "अनुरेखा":
+            return [f"{n} ({to_dev_digits(str(l))})" for n, l in reversed(e.trace)]
+        return None
 
 
 class PrecheckError(SanskritaError):
@@ -262,6 +329,8 @@ def type_name_of(v):
         return "python-वस्तु"
     if isinstance(v, SModule):
         return "कोष्ठकम्"
+    if isinstance(v, SError):
+        return "दोषः"
     return "अज्ञातः"
 
 
@@ -531,6 +600,8 @@ class Parser:
             params.append(self.param())
             while self.at("OP", ","):
                 self.advance()
+                if self.at("OP", ")"):             # trailing comma is fine
+                    break
                 params.append(self.param())
         self.expect_op(")", "')' अपेक्षितम्", "expected ')'")
         body = self.block()
@@ -677,6 +748,8 @@ class Parser:
                     args.append(self.argument())
                     while self.at("OP", ","):
                         self.advance()
+                        if self.at("OP", ")"):     # trailing comma is fine
+                            break
                         args.append(self.argument())
                 self.expect_op(")", "')' अपेक्षितम्", "expected ')'")
                 e = ("call", e, args, line)
@@ -748,6 +821,8 @@ class Parser:
                 items.append(self.expression())
                 while self.at("OP", ","):
                     self.advance()
+                    if self.at("OP", "]"):             # trailing comma is fine
+                        break
                     items.append(self.expression())
             self.expect_op("]", "']' अपेक्षितम्", "expected ']'")
             return ("list", items, line)
@@ -757,6 +832,8 @@ class Parser:
                 pairs.append(self.pair())
                 while self.at("OP", ","):
                     self.advance()
+                    if self.at("OP", "}"):             # trailing comma is fine
+                        break
                     pairs.append(self.pair())
             self.expect_op("}", "'}' अपेक्षितम्", "expected '}'")
             return ("map", pairs, line)
@@ -1154,10 +1231,40 @@ def _make_sanskritam():
 
 
 def _make_ganitam():
-    """गणितम् — mathematics, with Sanskrit names (wraps Python's math)."""
+    """गणितम् — mathematics, with Sanskrit names."""
     import math
     import types
+    from decimal import ROUND_HALF_UP
     ns = types.SimpleNamespace()
+
+    def परिवृत्त(x, स्थानानि=0):
+        """Round to a fixed number of decimal places — **half away from zero**.
+
+        This is the commercial convention (₹२.५ → ₹३, ₹-२.५ → ₹-३), not
+        banker's rounding, because that is what an invoice, a payslip and an
+        auditor expect. Division still uses half-even at 28 significant digits;
+        this function is the place where you say "and now make it money".
+
+        The result keeps exactly `स्थानानि` decimal places, so १०० becomes
+        १००.०० — which is what you want in a printed total.
+        """
+        if isinstance(x, bool) or not isinstance(x, (int, Decimal)):
+            raise SanskritaError(0, "परिवृत्त() शुद्धां सङ्ख्याम् अपेक्षते",
+                                 "परिवृत्त() expects an exact number "
+                                 "(पूर्णाङ्कः or दशमांशः)")
+        if isinstance(स्थानानि, bool) or not isinstance(स्थानानि, int):
+            raise SanskritaError(0, "परिवृत्त(सङ्ख्या, स्थानानि) — स्थानानि पूर्णाङ्कः",
+                                 "परिवृत्त(number, places) — places must be a "
+                                 "whole number")
+        if स्थानानि < 0:
+            raise SanskritaError(0, "स्थानानि ऋणात्मकानि न भवेयुः",
+                                 "places cannot be negative")
+        d = Decimal(x)
+        with localcontext() as ctx:
+            ctx.prec = max(_digits(d) + स्थानानि + 4, 28)
+            return d.quantize(Decimal(1).scaleb(-स्थानानि),
+                              rounding=ROUND_HALF_UP)
+
     for dev_name, obj in (
         ('वर्गमूलम्', math.sqrt),        # square root
         ('घातः', math.pow),              # power
@@ -1172,6 +1279,7 @@ def _make_ganitam():
         ('ई', math.e),                   # e
     ):
         setattr(ns, dev_name, obj)
+    setattr(ns, 'परिवृत्त', RawFn(परिवृत्त))    # round to N places, half-up
     return ns
 
 
@@ -1187,15 +1295,108 @@ def _make_yadrcchikam():
 
 
 def _make_kalah():
-    """कालः — time and dates, with Sanskrit names (wraps Python's datetime)."""
+    """कालः — dates and times.
+
+    Four functions were enough for a demo and useless for real work: no
+    parsing, no formatting, no arithmetic. A date here is an ISO text
+    ("२०२६-०७-२५"), because text is what files, JSON and users hand you — and
+    every function below accepts either Devanagari or ASCII digits.
+
+    Durations are counted in **days** for दिनयोगः/अन्तरम्, and in **seconds**
+    for the timestamp functions. All RawFn: dates and counts must not be
+    laundered through floats.
+    """
     import datetime
     import time
     import types
     ns = types.SimpleNamespace()
-    setattr(ns, 'अद्य', lambda: to_dev_digits(str(datetime.date.today())))       # today
-    setattr(ns, 'संप्रति', lambda: to_dev_digits(datetime.datetime.now().strftime("%H:%M:%S")))  # now
-    setattr(ns, 'वर्षः', lambda: datetime.date.today().year)           # year
-    setattr(ns, 'क्षणविरामः', time.sleep)                              # pause (seconds)
+
+    def _parse(v, who="कालः"):
+        if isinstance(v, datetime.date):
+            return v
+        if not isinstance(v, str):
+            raise SanskritaError(0, f"{who} दिनाङ्कं वाक्यरूपेण अपेक्षते",
+                                 f"{who} expects a date as text, e.g. \"२०२६-०७-२५\"")
+        t = to_ascii_digits(v.strip())
+        for fmt in ("%Y-%m-%d", "%Y/%m/%d", "%d-%m-%Y", "%d/%m/%Y"):
+            try:
+                return datetime.datetime.strptime(t, fmt).date()
+            except ValueError:
+                continue
+        raise SanskritaError(0, f"'{v}' इति दिनाङ्कः न ज्ञातः",
+                             f"'{v}' is not a date I recognise "
+                             f"(try २०२६-०७-२५)")
+
+    def _fmt(d):
+        return to_dev_digits(d.isoformat())
+
+    # ---- now
+    def अद्य():
+        return _fmt(datetime.date.today())
+
+    def संप्रति():
+        return to_dev_digits(datetime.datetime.now().strftime("%H:%M:%S"))
+
+    def कालमुद्रा():
+        """seconds since the Unix epoch, as an exact whole number"""
+        return int(time.time())
+
+    # ---- parts of a date
+    def वर्षः(d=None):
+        return (_parse(d, "वर्षः()") if d is not None else datetime.date.today()).year
+
+    def मासः(d=None):
+        return (_parse(d, "मासः()") if d is not None else datetime.date.today()).month
+
+    def दिनम्(d=None):
+        return (_parse(d, "दिनम्()") if d is not None else datetime.date.today()).day
+
+    _VARA = ["सोमवासरः", "मङ्गलवासरः", "बुधवासरः", "गुरुवासरः",
+             "शुक्रवासरः", "शनिवासरः", "रविवासरः"]
+
+    def वासरः(d=None):
+        dd = _parse(d, "वासरः()") if d is not None else datetime.date.today()
+        return _VARA[dd.weekday()]
+
+    # ---- arithmetic
+    def दिनयोगः(d, n):
+        """add n days (negative subtracts) — the whole point of a date library"""
+        if isinstance(n, bool) or not isinstance(n, int):
+            raise SanskritaError(0, "दिनयोगः(दिनाङ्कः, पूर्णाङ्कः)",
+                                 "दिनयोगः(date, whole number of days)")
+        return _fmt(_parse(d, "दिनयोगः()") + datetime.timedelta(days=n))
+
+    def अन्तरम्(a, b):
+        """whole days from a to b; negative when b is earlier"""
+        return (_parse(b, "अन्तरम्()") - _parse(a, "अन्तरम्()")).days
+
+    def पूर्वम्(a, b):
+        return _parse(a, "पूर्वम्()") < _parse(b, "पूर्वम्()")
+
+    def शुद्धः(v):
+        """is this text a date I can read? — for validating user input"""
+        try:
+            _parse(v)
+            return True
+        except SanskritaError:
+            return False
+
+    def रूपय(d, आकारः="%Y-%m-%d"):
+        """format a date; the pattern is strftime's, digits come back Devanagari"""
+        return to_dev_digits(_parse(d, "रूपय()").strftime(to_ascii_digits(आकारः)))
+
+    def अधिवर्षः(y=None):
+        """leap year?"""
+        y = int(y) if y is not None else datetime.date.today().year
+        return y % 4 == 0 and (y % 100 != 0 or y % 400 == 0)
+
+    for name, fn in (('अद्य', अद्य), ('संप्रति', संप्रति), ('कालमुद्रा', कालमुद्रा),
+                     ('वर्षः', वर्षः), ('मासः', मासः), ('दिनम्', दिनम्),
+                     ('वासरः', वासरः), ('दिनयोगः', दिनयोगः), ('अन्तरम्', अन्तरम्),
+                     ('पूर्वम्', पूर्वम्), ('शुद्धः', शुद्धः), ('रूपय', रूपय),
+                     ('अधिवर्षः', अधिवर्षः)):
+        setattr(ns, name, RawFn(fn))
+    setattr(ns, 'क्षणविरामः', RawFn(lambda s: time.sleep(float(s))))
     return ns
 
 
@@ -1214,6 +1415,58 @@ def _make_vakyakarma():
     setattr(ns, 'आरभते', lambda t, p: t.startswith(p))          # starts with
     setattr(ns, 'अन्तयति', lambda t, p: t.endswith(p))          # ends with
     setattr(ns, 'अन्तर्भवति', lambda t, p: p in t)              # contains
+
+    def _format(पाठः, *मूल्यानि):
+        """आकारय("{} इत्यस्य मूल्यम् {}", "क", ५) → "क इत्यस्य मूल्यम् ५"
+
+        Each {} takes the next value, rendered the way वद would render it — so a
+        दशमांशः keeps its exact digits and never becomes a float.
+        """
+        parts = पाठः.split("{}")
+        if len(parts) - 1 != len(मूल्यानि):
+            raise SanskritaError(
+                0,
+                f"आकारय(): {to_dev_digits(str(len(parts) - 1))} स्थानानि, "
+                f"{to_dev_digits(str(len(मूल्यानि)))} मूल्यानि",
+                f"आकारय(): {len(parts)-1} placeholders but "
+                f"{len(मूल्यानि)} values")
+        out = [parts[0]]
+        for v, tail in zip(मूल्यानि, parts[1:]):
+            out.append(_render(v))
+            out.append(tail)
+        return "".join(out)
+
+    def _render(v):
+        if isinstance(v, bool):
+            return "सत्यम्" if v else "असत्यम्"
+        if v is None:
+            return "शून्यम्"
+        if isinstance(v, Decimal):
+            return to_dev_digits(format(v, "f"))
+        if isinstance(v, int):
+            return to_dev_digits(str(v))
+        return v if isinstance(v, str) else str(v)
+
+    def _pad(पाठः, विस्तारः):
+        """पूरय("क", ५) → "क    " ; पूरय("क", ०-५) → "    क"
+
+        Padding counts CHARACTERS, not display columns. In Devanagari a
+        conjunct or a matra may render narrower than a Latin letter, so a
+        padded column is approximately, not exactly, aligned — stated here
+        rather than pretended otherwise.
+        """
+        if not isinstance(पाठः, str):
+            पाठः = _render(पाठः)
+        if isinstance(विस्तारः, bool) or not isinstance(विस्तारः, int):
+            raise SanskritaError(0, "पूरय(पाठः, विस्तारः) — विस्तारः पूर्णाङ्कः",
+                                 "पूरय(text, width) — width must be a whole number")
+        n = abs(विस्तारः) - len(पाठः)
+        if n <= 0:
+            return पाठः
+        return (" " * n) + पाठः if विस्तारः < 0 else पाठः + (" " * n)
+
+    setattr(ns, 'आकारय', RawFn(_format))                        # format
+    setattr(ns, 'पूरय', RawFn(_pad))                            # pad to a width
     return ns
 
 
@@ -1282,8 +1535,48 @@ def _make_suchikarma():
             acc = acc + x
         return acc
 
+    def _sort(lst, कुञ्जिका=None):
+        """क्रमय(सूची) sorts; क्रमय(सूची, विधिः) sorts by what विधिः returns.
+        Stable, so equal keys keep their original order."""
+        items = _need_list(lst, "क्रमय()")
+        if कुञ्जिका is None:
+            return sorted(items, key=_sort_key)
+        return sorted(items, key=lambda x: _sort_key(कुञ्जिका(x)))
+
+    def _sort_key(v):
+        # numbers before text, each ordered among themselves — mixing types in
+        # one सूची is unusual, and this beats crashing on it
+        if isinstance(v, bool):
+            return (1, str(v))
+        if isinstance(v, (int, Decimal)):
+            return (0, v)
+        return (1, str(v))
+
+    def _union(a, b):
+        out = list(_need_list(a, "सङ्गमः()"))
+        for x in _need_list(b, "सङ्गमः()"):
+            if not any(y == x for y in out):
+                out.append(x)
+        return out
+
+    def _intersect(a, b):
+        bl = _need_list(b, "सम्पातः()")
+        out = []
+        for x in _need_list(a, "सम्पातः()"):
+            if any(y == x for y in bl) and not any(y == x for y in out):
+                out.append(x)
+        return out
+
+    def _difference(a, b):
+        bl = _need_list(b, "भेदः()")
+        return [x for x in _need_list(a, "भेदः()") if not any(y == x for y in bl)]
+
     for dev_name, fn in (
         ('छानय', _filter),                                        # filter
+        ('क्रमय', _sort),                                          # sort (with key)
+        ('सङ्गमः', _union),                                        # union
+        ('सम्पातः', _intersect),                                   # intersection
+        ('भेदः', _difference),                                     # difference
         ('प्रतिचित्रय', lambda lst, f: [f(x) for x in _need_list(lst, "प्रतिचित्रय()")]),
         ('न्यूनीकरण', _reduce),                                    # reduce
         ('विपर्यय', lambda lst: list(reversed(_need_list(lst, "विपर्यय()")))),
@@ -1374,6 +1667,311 @@ def _make_json():
     return ns
 
 
+def _make_niyamitam():
+    """नियमितम् — regular expressions (√नियम् = to regulate; a *rule* for text).
+
+    The pattern syntax is the standard one the whole world already knows, on
+    purpose: inventing a Devanagari regex dialect would make every tutorial,
+    every Stack Overflow answer and every existing pattern useless. The
+    *function names* are Sanskrit; the pattern language is shared.
+
+    ONE RULE WORTH KNOWING. Patterns are Unicode-aware, so `\\d` matches ०–९ as
+    well as 0–9, and `\\w` matches नमस्ते. But `[0-9]` is a literal ASCII range
+    and will NOT match १२३ — write `\\d` and both scripts work. This is the one
+    place where "the pattern language is shared" has a visible cost, and it is
+    cheaper than a private dialect.
+    """
+    import re
+    import types
+    ns = types.SimpleNamespace()
+
+    def _compile(pat, who):
+        if not isinstance(pat, str):
+            raise SanskritaError(0, f"{who} प्रतिरूपं वाक्यरूपेण अपेक्षते",
+                                 f"{who} expects the pattern as text")
+        try:
+            return re.compile(pat, re.UNICODE)
+        except re.error as err:
+            raise SanskritaError(0, f"अशुद्धं प्रतिरूपम् '{pat}' — {err}",
+                                 f"invalid pattern '{pat}' — {err}")
+
+    def मेलति(pat, text):
+        """does the pattern occur anywhere in the text?"""
+        return _compile(pat, "मेलति()").search(text) is not None
+
+    def आदिमेलति(pat, text):
+        """does the text START with a match?"""
+        return _compile(pat, "आदिमेलति()").match(text) is not None
+
+    def खोज(pat, text):
+        """first match as text, or शून्यम् when there is none"""
+        m = _compile(pat, "खोज()").search(text)
+        return m.group(0) if m else None
+
+    def सर्वाणि(pat, text):
+        """every match, as a सूची. Groups, if the pattern has any, come back
+        as a सूची per match."""
+        out = []
+        for m in _compile(pat, "सर्वाणि()").finditer(text):
+            out.append(list(m.groups()) if m.groups() else m.group(0))
+        return out
+
+    def स्थानम्(pat, text):
+        """1-based position of the first match; ० when absent — the same
+        convention as वाक्यकर्म.खोज"""
+        m = _compile(pat, "स्थानम्()").search(text)
+        return m.start() + 1 if m else 0
+
+    def प्रतिस्थापय(pat, repl, text, कति=0):
+        return _compile(pat, "प्रतिस्थापय()").sub(repl, text, count=int(कति))
+
+    def विभज(pat, text):
+        return _compile(pat, "विभज()").split(text)
+
+    def समूहाः(pat, text):
+        """the capture groups of the first match, as a सूची (empty when none)"""
+        m = _compile(pat, "समूहाः()").search(text)
+        return list(m.groups()) if m else []
+
+    for name, fn in (('मेलति', मेलति), ('आदिमेलति', आदिमेलति), ('खोज', खोज),
+                     ('सर्वाणि', सर्वाणि), ('स्थानम्', स्थानम्),
+                     ('प्रतिस्थापय', प्रतिस्थापय), ('विभज', विभज),
+                     ('समूहाः', समूहाः)):
+        setattr(ns, name, RawFn(fn))
+    return ns
+
+
+def _make_sarani():
+    """सारणी — CSV (सारणी = a table).
+
+    Enterprise data arrives as CSV far more often than as JSON. Quoting,
+    embedded commas and embedded newlines are handled properly by the same
+    rules everyone else uses (RFC 4180), and — like जेसन — **numbers are never
+    guessed at**: every field comes back as वाक्यम्. Converting is your
+    decision, made with सङ्ख्या(), not a silent one made by the parser.
+    """
+    import csv
+    import io
+    import types
+    ns = types.SimpleNamespace()
+
+    def विश्लेषय(text, विभाजकः=","):
+        """CSV text → सूची of सूची (rows of fields)"""
+        if not isinstance(text, str):
+            raise SanskritaError(0, "विश्लेषय() वाक्यम् अपेक्षते",
+                                 "विश्लेषय() expects text")
+        return [list(row) for row in
+                csv.reader(io.StringIO(text), delimiter=str(विभाजकः))]
+
+    def कोशाः(text, विभाजकः=","):
+        """CSV text with a header row → सूची of कोशः, keyed by the header"""
+        rows = विश्लेषय(text, विभाजकः)
+        if not rows:
+            return []
+        head = rows[0]
+        return [{head[i] if i < len(head) else str(i + 1): v
+                 for i, v in enumerate(row)} for row in rows[1:]]
+
+    def पाठय(rows, विभाजकः=","):
+        """सूची of सूची (or of कोशः) → CSV text"""
+        if not isinstance(rows, list):
+            raise SanskritaError(0, "पाठय() सूचीं सूचीनाम् अपेक्षते",
+                                 "पाठय() expects a list of rows")
+        buf = io.StringIO()
+        w = csv.writer(buf, delimiter=str(विभाजकः), lineterminator="\n")
+        if rows and isinstance(rows[0], dict):
+            head = list(rows[0].keys())
+            w.writerow(head)
+            for r in rows:
+                w.writerow([_cell(r.get(k)) for k in head])
+        else:
+            for r in rows:
+                if not isinstance(r, list):
+                    raise SanskritaError(0, "पाठय() प्रतिपङ्क्ति सूचीम् अपेक्षते",
+                                         "पाठय() expects each row to be a list")
+                w.writerow([_cell(v) for v in r])
+        return buf.getvalue()
+
+    def _cell(v):
+        if v is None:
+            return ""
+        if isinstance(v, bool):
+            return "सत्यम्" if v else "असत्यम्"
+        if isinstance(v, Decimal):
+            return format(v, "f")          # exact digits, never a float
+        return v if isinstance(v, str) else str(v)
+
+    for name, fn in (('विश्लेषय', विश्लेषय), ('कोशाः', कोशाः), ('पाठय', पाठय)):
+        setattr(ns, name, RawFn(fn))
+    return ns
+
+
+def _make_gudha():
+    """गूढ — hashing, identifiers and encoding (गूढ = hidden, encoded).
+
+    Note what is deliberately **absent**: encryption. Shipping a home-grown
+    crypto API would be worse than shipping none, and a language this young has
+    no business holding anyone's secrets. These are the everyday tools —
+    checksums, cache keys, IDs, transport encoding — and the names say what they
+    are for.
+    """
+    import base64
+    import hashlib
+    import types
+    import uuid
+    ns = types.SimpleNamespace()
+
+    def _bytes(v, who):
+        if isinstance(v, str):
+            return v.encode("utf-8")
+        raise SanskritaError(0, f"{who} वाक्यम् अपेक्षते", f"{who} expects text")
+
+    def सङ्क्षेपः(text, विधिः="sha256"):
+        """SHA-256 digest, as lowercase hex.
+
+        One algorithm on purpose. MD5 and SHA-1 are broken and offering them
+        invites their use; anything else would have to be hand-written a second
+        time in वेगः, and two hash implementations that could drift is a worse
+        risk than a missing option. If you truly need another, the Python
+        bridge has all of them: आनय "python:hashlib" इति ह।
+        """
+        algo = to_ascii_digits(str(विधिः)).lower()
+        if algo != "sha256":
+            raise SanskritaError(0,
+                                 f"'{विधिः}' इति विधिः नास्ति — sha256 एव",
+                                 f"'{विधिः}' is not available — only sha256. "
+                                 f"For others use the bridge: "
+                                 f'आनय "python:hashlib" इति ह।')
+        return hashlib.sha256(_bytes(text, "सङ्क्षेपः()")).hexdigest()
+
+    def एकाकी():
+        """a version-4 UUID — a name no other machine will produce.
+
+        Note honestly: this is for identifiers, not secrets. The reference
+        engine uses the OS random source; वेगः uses its own generator. Neither
+        is promised to be cryptographically strong, and you should not use a
+        UUID as a password or a token.
+        """
+        return str(uuid.uuid4())
+
+    def गूढय(text):
+        return base64.b64encode(_bytes(text, "गूढय()")).decode("ascii")
+
+    def प्रकटय(text):
+        try:
+            return base64.b64decode(_bytes(text, "प्रकटय()")).decode("utf-8")
+        except Exception as err:
+            raise SanskritaError(0, f"अशुद्धं base64 — {err}",
+                                 f"not valid base64 — {err}")
+
+    for name, fn in (('सङ्क्षेपः', सङ्क्षेपः), ('एकाकी', एकाकी),
+                     ('गूढय', गूढय), ('प्रकटय', प्रकटय)):
+        setattr(ns, name, RawFn(fn))
+    return ns
+
+
+def _make_parivesha():
+    """परिवेशः — the world outside the program: environment, exit codes, streams.
+
+    A program that cannot read its configuration or say whether it succeeded is
+    not something you can put in a pipeline or a cron job. This is the module
+    that makes संस्कृता scriptable.
+    """
+    import os
+    import sys
+    import types
+    ns = types.SimpleNamespace()
+
+    def चरः(name, अन्यथा=None):
+        """an environment variable, or अन्यथा (शून्यम् by default) when unset"""
+        if not isinstance(name, str):
+            raise SanskritaError(0, "चरः() नाम वाक्यरूपेण अपेक्षते",
+                                 "चरः() expects the name as text")
+        v = os.environ.get(name)
+        return अन्यथा if v is None else v
+
+    def चराः():
+        """every environment variable, as a कोशः"""
+        return dict(os.environ)
+
+    def निर्गम(सङ्केतः=0):
+        """stop the program with an exit code — ० means success, as the shell
+        expects. This is how a संस्कृता program participates in a pipeline."""
+        if isinstance(सङ्केतः, bool) or not isinstance(सङ्केतः, int):
+            raise SanskritaError(0, "निर्गम(पूर्णाङ्कः)",
+                                 "निर्गम(whole number exit code)")
+        raise SystemExit(int(सङ्केतः))
+
+    def दोषवद(*vals):
+        """print to stderr — so real output stays clean and pipeable"""
+        print(" ".join(v if isinstance(v, str) else str(v) for v in vals),
+              file=sys.stderr)
+
+    def कार्यसूचिका():
+        return os.getcwd()
+
+    def मञ्चः():
+        """which operating system: 'Darwin', 'Linux', 'Windows'"""
+        import platform
+        return platform.system()
+
+    for name, fn in (('चरः', चरः), ('चराः', चराः), ('निर्गम', निर्गम),
+                     ('दोषवद', दोषवद), ('कार्यसूचिका', कार्यसूचिका),
+                     ('मञ्चः', मञ्चः)):
+        setattr(ns, name, RawFn(fn))
+    return ns
+
+
+def _make_lekhani():
+    """लेखनी — logging (लेखनी = a pen).
+
+    Five levels, timestamps, and output on **stderr** so logs never contaminate
+    a program's real output. `वद` is for what your program produces; लेखनी is
+    for what it wants to tell you about itself. Confusing the two is why so many
+    scripts cannot be piped.
+    """
+    import datetime
+    import sys
+    import types
+    ns = types.SimpleNamespace()
+
+    LEVELS = {"विवरणम्": 10, "सूचना": 20, "चेतावनी": 30, "दोषः": 40, "महादोषः": 50}
+    state = {"स्तरः": 20, "सञ्चिका": None}
+
+    def _emit(level, vals):
+        if LEVELS[level] < state["स्तरः"]:
+            return
+        stamp = to_dev_digits(datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+        text = " ".join(v if isinstance(v, str) else
+                        (format(v, "f") if isinstance(v, Decimal) else str(v))
+                        for v in vals)
+        line = f"[{stamp}] {level}: {text}"
+        if state["सञ्चिका"]:
+            with open(state["सञ्चिका"], "a", encoding="utf-8") as f:
+                f.write(line + "\n")
+        else:
+            print(line, file=sys.stderr)
+
+    def स्तरः(name):
+        """below this level, nothing is emitted"""
+        key = str(name)
+        if key not in LEVELS:
+            raise SanskritaError(0, f"'{name}' इति स्तरः न ज्ञातः — "
+                                    f"{', '.join(LEVELS)}",
+                                 f"unknown level '{name}' — {', '.join(LEVELS)}")
+        state["स्तरः"] = LEVELS[key]
+
+    def सञ्चिकायाम्(path):
+        """append to a file instead of stderr; शून्यम् goes back to stderr"""
+        state["सञ्चिका"] = path
+
+    for level in LEVELS:
+        setattr(ns, level, RawFn(lambda *v, _l=level: _emit(_l, v)))
+    setattr(ns, 'स्तरः', RawFn(स्तरः))
+    setattr(ns, 'सञ्चिकायाम्', RawFn(सञ्चिकायाम्))
+    return ns
+
+
 # ------------------------------------------------------- built-in methods
 # §7d #2 — "sandhi-style composition": chain operations the way Sanskrit
 # compounds words.  सूची.छानय(…).क्रमय().विपर्यय()
@@ -1384,15 +1982,16 @@ def _make_json():
 BUILTIN_METHODS = {
     'सूची': ('सूचीकर्म', ['छानय', 'प्रतिचित्रय', 'न्यूनीकरण', 'विपर्यय',
                           'अन्तर्भवति', 'अनुक्रमः', 'योगः', 'महत्तमम्',
-                          'लघुत्तमम्', 'अद्वितीयम्']),
+                          'लघुत्तमम्', 'अद्वितीयम्', 'क्रमय', 'सङ्गमः',
+                          'सम्पातः', 'भेदः']),
     'वाक्यम्': ('वाक्यकर्म', ['विभज', 'खोज', 'प्रतिस्थापय', 'अंश', 'उच्च',
                               'निम्न', 'परिष्कार', 'आरभते', 'अन्तयति',
-                              'अन्तर्भवति']),
+                              'अन्तर्भवति', 'आकारय', 'पूरय']),
 }
 
 # builtins that also read naturally as methods: सूची.क्रमय(), वाक्यम्.दैर्घ्यम्()
 BUILTIN_METHOD_BUILTINS = {
-    'सूची': ['क्रमय', 'दैर्घ्यम्', 'योजय', 'अपनय'],
+    'सूची': ['दैर्घ्यम्', 'योजय', 'अपनय'],
     'कोशः': ['कुञ्जिकाः', 'दैर्घ्यम्', 'अपनय'],
     'वाक्यम्': ['दैर्घ्यम्'],
 }
@@ -1417,6 +2016,11 @@ NATIVE_MODULES = {
     'सूचीकर्म': _make_suchikarma, 'suchikarma': _make_suchikarma,
     'सञ्चिका': _make_sanchika, 'sanchika': _make_sanchika,
     'जेसन': _make_json, 'json': _make_json,
+    'नियमितम्': _make_niyamitam, 'niyamitam': _make_niyamitam,
+    'सारणी': _make_sarani, 'sarani': _make_sarani,
+    'गूढ': _make_gudha, 'gudha': _make_gudha,
+    'परिवेशः': _make_parivesha, 'parivesha': _make_parivesha,
+    'लेखनी': _make_lekhani, 'lekhani': _make_lekhani,
 }
 
 # ----------------------------------------------------------- interpreter
@@ -1466,6 +2070,8 @@ class Interpreter:
             return f"<वर्गः {v.name}>"
         if isinstance(v, SInstance):
             return f"<{v.cls.name} वस्तु>"
+        if isinstance(v, SError):
+            return v.err.sa          # so वद(त्रु) reads as it always did
         if isinstance(v, PyVal):
             return str(v.raw)
         return str(v)
@@ -1520,8 +2126,12 @@ class Interpreter:
         elif kind == "throw":
             _, expr, line = st
             msg = self.eval(expr, env)
+            if isinstance(msg, SError):
+                # क्षिप त्रु। — re-raise exactly what was caught, trace and all
+                raise SanskritaError(msg.err.line, msg.err.sa, msg.err.en,
+                                     msg.err.kind, msg.err.trace)
             text = msg if isinstance(msg, str) else self.display(msg)
-            raise SanskritaError(line, text, text)
+            raise SanskritaError(line, text, text, "स्वयंदोषः")
         elif kind == "break":
             raise BreakSignal(st[1])
         elif kind == "continue":
@@ -1595,7 +2205,7 @@ class Interpreter:
             try:
                 self.run(try_body, env)
             except SanskritaError as err:
-                env.vars[err_name] = err.sa
+                env.vars[err_name] = SError(err)
                 self.run(catch_body, env)
         elif kind == "import":
             _, mod, alias, line = st
@@ -1691,12 +2301,14 @@ class Interpreter:
                 f"'{name}' शून्यं न स्वीकरोति — घोषणे '?' प्रयुज्यताम् "
                 f"(मानय {name}? : {typename} = शून्यम्।)",
                 f"'{name}' cannot hold शून्यम् — declare it nullable with '?' "
-                f"(मानय {name}? : {typename} = शून्यम्।)")
+                f"(मानय {name}? : {typename} = शून्यम्।)",
+                "प्रकारदोषः")
         if not type_matches(typename, val):
             raise SanskritaError(
                 line,
                 f"प्रकारदोषः — '{name}' {typename} इति घोषितम्, {type_name_of(val)} प्राप्तम्",
-                f"type error — '{name}' is declared {typename}, got {type_name_of(val)}")
+                f"type error — '{name}' is declared {typename}, got {type_name_of(val)}",
+                "प्रकारदोषः")
 
     def truth(self, cond_expr, env):
         v = self.eval(cond_expr, env)
@@ -1722,7 +2334,7 @@ class Interpreter:
                 en = en.parent
             sa_h, en_h = hint_for(name, env.all_names())
             raise SanskritaError(e[2], f"अज्ञातं नाम '{name}'{sa_h}",
-                                 f"unknown name '{name}'{en_h}")
+                                 f"unknown name '{name}'{en_h}", "नामदोषः")
         if kind == "list":
             return [self.eval(x, env) for x in e[1]]
         if kind == "map":
@@ -1797,7 +2409,8 @@ class Interpreter:
             if isinstance(obj, dict):
                 if idx not in obj:
                     raise SanskritaError(line, f"कुञ्जिका '{idx}' कोशे नास्ति",
-                                         f"key '{idx}' not found in the कोशः")
+                                         f"key '{idx}' not found in the कोशः",
+                                         "सीमादोषः")
                 return obj[idx]
             raise SanskritaError(line, f"{type_name_of(obj)} स्थानाङ्कं न गृह्णाति",
                                  f"cannot index into {type_name_of(obj)}")
@@ -1820,6 +2433,12 @@ class Interpreter:
                 raise SanskritaError(line,
                                      f"'{obj.name}' कोष्ठके '{name}' नास्ति{sa_h}",
                                      f"module '{obj.name}' has no '{name}'{en_h}")
+            if isinstance(obj, SError):
+                if name in SError.FIELDS:
+                    return obj.get(name)
+                sa_h, en_h = hint_for(name, SError.FIELDS)
+                raise SanskritaError(line, f"दोषे '{name}' नास्ति{sa_h}",
+                                     f"an error has no '{name}'{en_h}")
             if isinstance(obj, PyVal):
                 try:
                     got = getattr(obj.raw, name)
@@ -1842,11 +2461,13 @@ class Interpreter:
     def list_index(self, seq, idx, line):
         if isinstance(idx, bool) or not isinstance(idx, int):
             raise SanskritaError(line, "स्थानाङ्कः पूर्णाङ्कः भवेत्",
-                                 "index must be a whole number (पूर्णाङ्कः)")
+                                 "index must be a whole number (पूर्णाङ्कः)",
+                                 "प्रकारदोषः")
         if idx < 1 or idx > len(seq):
             raise SanskritaError(line,
                                  f"स्थानाङ्कः {to_dev_digits(str(idx))} सीमाबहिः (१..{to_dev_digits(str(len(seq)))})",
-                                 f"index {idx} out of range (1..{len(seq)}) — संस्कृता counts from १ (प्रथमः)")
+                                 f"index {idx} out of range (1..{len(seq)}) — संस्कृता counts from १ (प्रथमः)",
+                                 "सीमादोषः")
         return idx
 
     # ---- calling
@@ -1934,6 +2555,15 @@ class Interpreter:
         return to_py(v)
 
     def call_function(self, fn, args, line, self_val=None):
+        try:
+            return self._call_function(fn, args, line, self_val)
+        except SanskritaError as err:
+            # Each विधि the error escapes adds its own frame, so by the time it
+            # reaches the top we have the whole chain — innermost first.
+            err.trace.append((fn.name, line))
+            raise
+
+    def _call_function(self, fn, args, line, self_val=None):
         local = Env(parent=fn.closure)
         params = fn.params
         # hot path: all-positional call with matching arity, no self/labels
@@ -2094,12 +2724,12 @@ class Interpreter:
                 return a * b
             if op == "%":
                 if b == 0:
-                    raise SanskritaError(line, "शून्येन भागो न शक्यः", "division by zero")
+                    raise SanskritaError(line, "शून्येन भागो न शक्यः", "division by zero", "गणितदोषः")
                 return a % b
             # '/' falls through to exact-decimal handling below
         if isinstance(a, bool) or isinstance(b, bool):
             raise SanskritaError(line, "सत्यासत्येन गणितं न शक्यम्",
-                                 "cannot do arithmetic with सत्यम्/असत्यम्")
+                                 "cannot do arithmetic with सत्यम्/असत्यम्", "प्रकारदोषः")
         if op == "+" and isinstance(a, str) and isinstance(b, str):
             return a + b
         if op == "+" and isinstance(a, list) and isinstance(b, list):
@@ -2107,17 +2737,18 @@ class Interpreter:
         if isinstance(a, str) or isinstance(b, str):
             raise SanskritaError(line,
                                  "वाक्यं सङ्ख्या च न मिश्रणीये — 'वाक्यम्()' प्रयुज्यताम्",
-                                 "cannot mix text and number — convert with वाक्यम्()/vaakyam()")
+                                 "cannot mix text and number — convert with वाक्यम्()/vaakyam()",
+                                 "प्रकारदोषः")
         if isinstance(a, float) or isinstance(b, float):
             # द्रुतदशमांशः is contagious: once you opt into binary floats, the
             # result is a binary float. Mixing is allowed but never silent —
             # प्रकारः() will tell you what you are holding.
             if not isinstance(a, (int, float, Decimal)) or \
                not isinstance(b, (int, float, Decimal)):
-                raise SanskritaError(line, "सङ्ख्ये अपेक्षिते", "expected numbers")
+                raise SanskritaError(line, "सङ्ख्ये अपेक्षिते", "expected numbers", "प्रकारदोषः")
             fa, fb = float(a), float(b)
             if op in ("/", "%") and fb == 0.0:
-                raise SanskritaError(line, "शून्येन भागो न शक्यः", "division by zero")
+                raise SanskritaError(line, "शून्येन भागो न शक्यः", "division by zero", "गणितदोषः")
             if op == "+":
                 return fa + fb
             if op == "-":
@@ -2129,25 +2760,86 @@ class Interpreter:
             if op == "%":
                 return fa % fb
         if not isinstance(a, (int, Decimal)) or not isinstance(b, (int, Decimal)):
-            raise SanskritaError(line, "सङ्ख्ये अपेक्षिते", "expected numbers")
-        if op == "+":
-            return a + b
-        if op == "-":
-            return a - b
-        if op == "*":
-            return a * b
+            raise SanskritaError(line, "सङ्ख्ये अपेक्षिते", "expected numbers", "प्रकारदोषः")
+        if op in ("+", "-", "*"):
+            return _exact(op, a, b)
         if op in ("/", "%") and b == 0:
-            raise SanskritaError(line, "शून्येन भागो न शक्यः", "division by zero")
-        if op == "/":
-            result = Decimal(a) / Decimal(b)
-            if result == result.to_integral_value():
-                try:
-                    result = result.quantize(Decimal(1))
-                except Exception:
-                    pass
-            return result
+            raise SanskritaError(line, "शून्येन भागो न शक्यः", "division by zero", "गणितदोषः")
         if op == "%":
-            return a % b
+            return _floor_mod(a, b)
+        # op == "/" — exact when it divides evenly, else 28 significant digits
+        result = Decimal(a) / Decimal(b)
+        if result == result.to_integral_value():
+            try:
+                result = result.quantize(Decimal(1))
+            except Exception:
+                pass
+        return result
+
+# ------------------------------------------------- exact decimal arithmetic
+# Python's default decimal context rounds EVERY operation to 28 significant
+# digits — so `a + ०.०००१` on a large number silently drops the addend, and
+# `a % b` on a large number raises DivisionImpossible outright. Neither is
+# acceptable in a language whose headline promise is exactness, and neither
+# matches वेगः, whose hand-written decimals have no precision ceiling.
+#
+# The rule, stated once and implemented here:
+#   +  -  *   are EXACT, with no digit limit
+#   %         is exact, computed on the unscaled integers (floored, like ints)
+#   /         is exact when it divides evenly, otherwise 28 SIGNIFICANT digits,
+#             rounded half-even — the one place a limit is unavoidable, and it
+#             is the same limit in both engines.
+
+def _digits(v):
+    return len(v.as_tuple().digits) + abs(v.as_tuple().exponent)
+
+
+def _exact(op, a, b):
+    """+, - or * on decimals, with enough precision that nothing is rounded."""
+    need = _digits(Decimal(a)) + _digits(Decimal(b)) + 4
+    with localcontext() as ctx:
+        ctx.prec = max(need, 28)
+        return a + b if op == "+" else (a - b if op == "-" else a * b)
+
+
+def _unscaled(v):
+    """(integer, exponent) such that value == integer * 10**exponent, exactly.
+
+    Done from as_tuple() rather than with Decimal operations, because every
+    Decimal operation — scaleb included — is rounded by the context, which is
+    exactly the trap this module exists to avoid.
+    """
+    if isinstance(v, int):
+        return v, 0
+    sign, digits, exp = v.as_tuple()
+    n = 0
+    for d in digits:
+        n = n * 10 + d
+    if sign:
+        n = -n
+    if exp > 0:                       # e.g. 1E+3 → 1000 with exponent 0
+        n *= 10 ** exp
+        exp = 0
+    return n, exp
+
+
+def _floor_mod(a, b):
+    """Exact floored remainder for any mix of int and Decimal, at any size.
+
+    Computed on the unscaled integers: line the two values up at a common
+    scale, use Python's integer `%` (which floors, as ours must), then put the
+    scale back. No precision ceiling, and no DivisionImpossible.
+    """
+    if isinstance(a, int) and isinstance(b, int):
+        return a % b
+    ia, ea = _unscaled(a)
+    ib, eb = _unscaled(b)
+    e = min(ea, eb)                                   # common scale
+    ia *= 10 ** (ea - e)
+    ib *= 10 ** (eb - e)
+    r = ia % ib                                       # Python's % floors
+    return Decimal(f"{r}E{e}") if e else Decimal(r)
+
 
 # ------------------------------------------------------------------ main
 

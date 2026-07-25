@@ -119,18 +119,46 @@ Optional annotations: `मानय क : पूर्णाङ्कः = ५�
 ```
 आनय "संस्कृतम्" इति सं।     # linguistics: सं.अक्षराणि सं.मात्राः सं.छन्दः सं.रोमनय सं.देवनागरय सं.संधय
 आनय "गणितम्" इति ग।        # math: ग.वर्गमूलम् ग.घातः ग.ज्या ग.कोज्या ग.पाई ग.तलम् ग.उपरितलम्
+                            #   ग.परिवृत्त(x, स्थानानि) — round HALF AWAY FROM ZERO to N
+                            #   places, keeping exactly N (१०० → १००.००). This is the
+                            #   "make it money" step; use it once, where a value becomes
+                            #   money, and totals reconcile.
 आनय "यादृच्छिकम्" इति य।   # random: य.अन्तरे(a,b) य.वरय(सूची) य.भिन्नम्()
 आनय "कालः" इति का।         # time: का.अद्य() का.संप्रति() का.वर्षः()
 आनय "वाक्यकर्म" इति वा।    # strings: वा.विभज(t,sep) वा.संयोजय(list,sep) वा.खोज(t,sub)→1-based(०=absent)
                             #          वा.प्रतिस्थापय(t,old,new) वा.अंश(t,i,j) substring 1-based inclusive
                             #          वा.उच्च वा.निम्न वा.परिष्कार वा.आरभते वा.अन्तयति वा.अन्तर्भवति
+                            #          वा.आकारय("{} = {}", क, ख) — {} takes the next value
+                            #          वा.पूरय(पाठः, विस्तारः) — pad to a width;
+                            #            negative width pads on the left (right-align).
+                            #            Counts characters, not display columns.
 आनय "सूचीकर्म" इति सू।     # lists: सू.छानय(l,f) सू.प्रतिचित्रय(l,f) सू.न्यूनीकरण(l,f,init)
+                            #        सू.क्रमय(l) or सू.क्रमय(l, keyfn) — stable sort
                             #        सू.विपर्यय सू.अन्तर्भवति सू.अनुक्रमः(→1-based, ०=absent)
                             #        सू.योगः सू.महत्तमम् सू.लघुत्तमम् सू.अद्वितीयम्
+                            #        सू.सङ्गमः / सू.सम्पातः / सू.भेदः (set operations)
 आनय "सञ्चिका" इति स।       # files (UTF-8): स.पठ(p) स.लिख(p,t) स.योजय(p,t) स.अस्ति(p)
                             #                स.निष्कासय(p) स.पङ्क्तयः(p) स.सूचिका(dir)
 आनय "जेसन" इति ज।          # JSON: ज.विश्लेषय(text)→value  ज.पाठय(value)→text
                             #       numbers with a fraction come back as दशमांशः, never a float
+आनय "सारणी" इति सा।        # CSV: सा.विश्लेषय(text)→rows  सा.कोशाः(text)→list of कोशः
+                            #      सा.पाठय(rows)→text. EVERY field is वाक्यम् — convert
+                            #      with सङ्ख्या() yourself; the parser never guesses.
+आनय "कालः" इति का।         # dates as ISO text: का.अद्य() का.वासरः(d) का.मासः(d)
+                            #   का.दिनयोगः(d, n) का.अन्तरम्(a, b) का.पूर्वम्(a, b)
+                            #   का.शुद्धः(d) का.रूपय(d, "%d/%m/%Y") का.अधिवर्षः(y)
+आनय "नियमितम्" इति नि।     # regex (REFERENCE ENGINE ONLY — वेगः rejects it):
+                            #   नि.मेलति(pat,t) नि.खोज(pat,t) नि.सर्वाणि(pat,t)
+                            #   नि.स्थानम्(pat,t)→1-based नि.प्रतिस्थापय(pat,repl,t)
+                            #   नि.विभज(pat,t) नि.समूहाः(pat,t)
+                            #   Patterns are ordinary PCRE-style. `\d` matches ०-९ AND
+                            #   0-9; `[0-9]` matches ONLY ASCII — write `\d`.
+आनय "गूढ" इति गू।          # गू.सङ्क्षेपः(t)→SHA-256 hex  गू.एकाकी()→UUID4
+                            #   गू.गूढय(t)/गू.प्रकटय(t)→base64. No encryption, by design.
+आनय "परिवेशः" इति प।       # प.चरः(name, default) प.चराः() प.निर्गम(code)
+                            #   प.दोषवद(…)→stderr  प.कार्यसूचिका()  प.मञ्चः()
+आनय "लेखनी" इति ले।        # ले.सूचना(…) ले.चेतावनी(…) ले.दोषः(…) — all to stderr
+                            #   ले.स्तरः("विवरणम्") ले.सञ्चिकायाम्("app.log")
 ```
 
 Every सूचीकर्म and वाक्यकर्म function is also reachable as a method on the value
@@ -156,13 +184,43 @@ Paths resolve relative to the importing file; modules are cached (imported once)
 
 Values convert automatically (Decimal↔float, lists, dicts, strings).
 
-## Error format
+## Errors
 
-Bilingual with line numbers and did-you-mean hints:
+Bilingual, with line numbers, did-you-mean hints, and a full call stack:
 
 ```
 दोषः पङ्क्तौ २ — अज्ञातं नाम 'वड' — किं 'वद' इति अभिप्रेतम्?
 Error at line 2 — unknown name 'वड' — did you mean: वद?
+
+अनुरेखा (नवीनतमम् आह्वानम् अन्ते) / traceback (most recent call last):
+    विधि 'बाह्यः' — पङ्क्तिः ९
+    → पङ्क्तिः २: अज्ञातं नाम 'वड'
+```
+
+`दोषे (त्रु)` binds an error **value**, not a string. It prints as its Sanskrit
+message (so `वद(त्रु)` reads as before) and answers:
+
+| field | what it holds |
+|---|---|
+| `त्रु.सन्देशः` | the Sanskrit message |
+| `त्रु.आङ्ग्लसन्देशः` | the English message |
+| `त्रु.पङ्क्तिः` | the line where it happened |
+| `त्रु.प्रकारः` | the kind — branch on this |
+| `त्रु.अनुरेखा` | the call stack, as a सूची of text, outermost first |
+
+Kinds: `दोषः` (unclassified) · `नामदोषः` (unknown name) · `प्रकारदोषः` (wrong
+type, text/number mixing) · `गणितदोषः` (division by zero) · `सीमादोषः` (index or
+key out of range) · `व्याकरणदोषः` (parse) · `आयातदोषः` (import) · `स्वयंदोषः`
+(raised by the program with `क्षिप`).
+
+`प्रकारः(त्रु)` is `"दोषः"`. `क्षिप त्रु।` re-raises it unchanged — same kind,
+same line, same traceback:
+
+```
+प्रयत { जोखिमम्()। } दोषे (त्रु) {
+    यदि (त्रु.प्रकारः == "गणितदोषः") { वद("शून्येन भागः")। }
+    अन्यथा { क्षिप त्रु। }
+}
 ```
 
 ## Common mistakes to avoid when generating code

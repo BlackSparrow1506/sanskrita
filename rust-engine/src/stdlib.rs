@@ -19,15 +19,26 @@ type RResult<T> = Result<T, String>;
 const SANSKRITAM: &[&str] = &["अक्षराणि", "अक्षरगणना", "मात्राः", "छन्दः",
                               "रोमनय", "देवनागरय", "संधय"];
 const GANITAM: &[&str] = &["वर्गमूलम्", "घातः", "तलम्", "उपरितलम्", "निरपेक्षम्",
-                           "ज्या", "कोज्या", "पाई", "ई"];
+                           "ज्या", "कोज्या", "पाई", "ई", "परिवृत्त"];
 const VAKYAKARMA: &[&str] = &["विभज", "संयोजय", "खोज", "प्रतिस्थापय", "अंश",
                               "उच्च", "निम्न", "परिष्कार", "आरभते", "अन्तयति",
-                              "अन्तर्भवति"];
+                              "अन्तर्भवति", "आकारय", "पूरय"];
 const YADRCCHIKAM: &[&str] = &["अन्तरे", "वरय", "भिन्नम्"];
-const KALAH: &[&str] = &["अद्य", "संप्रति", "वर्षः", "क्षणविरामः"];
+const KALAH: &[&str] = &["अद्य", "संप्रति", "कालमुद्रा", "वर्षः", "मासः",
+                         "दिनम्", "वासरः", "दिनयोगः", "अन्तरम्", "पूर्वम्",
+                         "शुद्धः", "रूपय", "अधिवर्षः", "क्षणविरामः"];
+const NIYAMITAM: &[&str] = &["मेलति", "आदिमेलति", "खोज", "सर्वाणि", "स्थानम्",
+                             "प्रतिस्थापय", "विभज", "समूहाः"];
+const SARANI: &[&str] = &["विश्लेषय", "कोशाः", "पाठय"];
+const GUDHA: &[&str] = &["सङ्क्षेपः", "एकाकी", "गूढय", "प्रकटय"];
+const PARIVESHA: &[&str] = &["चरः", "चराः", "निर्गम", "दोषवद",
+                             "कार्यसूचिका", "मञ्चः"];
+const LEKHANI: &[&str] = &["विवरणम्", "सूचना", "चेतावनी", "दोषः", "महादोषः",
+                           "स्तरः", "सञ्चिकायाम्"];
 const SUCHIKARMA: &[&str] = &["छानय", "प्रतिचित्रय", "न्यूनीकरण", "विपर्यय",
                               "अन्तर्भवति", "अनुक्रमः", "योगः", "महत्तमम्",
-                              "लघुत्तमम्", "अद्वितीयम्"];
+                              "लघुत्तमम्", "अद्वितीयम्", "क्रमय", "सङ्गमः",
+                              "सम्पातः", "भेदः"];
 const SANCHIKA: &[&str] = &["पठ", "लिख", "योजय", "अस्ति", "निष्कासय",
                             "पङ्क्तयः", "सूचिका"];
 const JSON: &[&str] = &["विश्लेषय", "पाठय"];
@@ -42,6 +53,11 @@ fn members(module: &str) -> &'static [&'static str] {
         "सूचीकर्म" => SUCHIKARMA,
         "सञ्चिका" => SANCHIKA,
         "जेसन" => JSON,
+        "नियमितम्" => NIYAMITAM,
+        "सारणी" => SARANI,
+        "गूढ" => GUDHA,
+        "परिवेशः" => PARIVESHA,
+        "लेखनी" => LEKHANI,
         _ => &[],
     }
 }
@@ -53,7 +69,7 @@ fn members(module: &str) -> &'static [&'static str] {
 const LIST_METHODS: &[&str] = SUCHIKARMA;
 const STR_METHODS: &[&str] = VAKYAKARMA;
 /// Builtins that also read naturally as methods, per receiver type.
-const LIST_BUILTINS: &[&str] = &["क्रमय", "दैर्घ्यम्", "योजय", "अपनय"];
+const LIST_BUILTINS: &[&str] = &["दैर्घ्यम्", "योजय", "अपनय"];
 const MAP_BUILTINS: &[&str] = &["कुञ्जिकाः", "दैर्घ्यम्", "अपनय"];
 const STR_BUILTINS: &[&str] = &["दैर्घ्यम्"];
 
@@ -107,8 +123,12 @@ pub fn intern(module: &str, name: &str) -> &'static str {
 }
 
 fn err(line: usize, sa: &str, en: &str) -> String {
-    format!("दोषः पङ्क्तौ {} — {}\nError at line {} — {}",
-            dev_digits(&line.to_string()), sa, line, en)
+    errk(line, sa, en, "दोषः")
+}
+
+/// Same, but naming the kind so a program can branch on it.
+fn errk(line: usize, sa: &str, en: &str, kind: &str) -> String {
+    crate::err::SError::new(line, sa, en, kind).encode()
 }
 
 fn want_str(v: Option<&Value>, line: usize, who: &str) -> RResult<String> {
@@ -130,6 +150,28 @@ fn want_num(v: Option<&Value>, line: usize, who: &str) -> RResult<f64> {
         _ => Err(err(line, &format!("{} सङ्ख्याम् अपेक्षते", who),
                      &format!("{} expects a number", who))),
     }
+}
+
+/// Ordering for क्रमय: numbers among themselves, then text among itself.
+fn sort_cmp(it: &Interp, a: &Value, b: &Value, line: usize)
+    -> RResult<std::cmp::Ordering>
+{
+    use std::cmp::Ordering;
+    let rank = |v: &Value| if v.is_numeric() && !matches!(v, Value::Bool(_)) { 0 } else { 1 };
+    match rank(a).cmp(&rank(b)) {
+        Ordering::Equal => {}
+        other => return Ok(other),
+    }
+    if rank(a) == 0 {
+        if it.greater_than(a, b, line)? {
+            return Ok(Ordering::Greater);
+        }
+        if it.greater_than(b, a, line)? {
+            return Ok(Ordering::Less);
+        }
+        return Ok(Ordering::Equal);
+    }
+    Ok(it.display(a).cmp(&it.display(b)))
 }
 
 fn want_list(v: Option<&Value>, line: usize, who: &str) -> RResult<Vec<Value>> {
@@ -216,6 +258,31 @@ pub fn call(it: &mut Interp, module: &str, name: &str, vals: Vec<Value>, line: u
             let x = want_num(vals.first(), line, "उपरितलम्()")?;
             Ok(Value::Int(BigInt::from_i64(x.ceil() as i64)))
         }
+        ("गणितम्", "परिवृत्त") => {
+            // the explicit "make it money" step — see Decimal::round_half_up
+            let places = match vals.get(1) {
+                None | Some(Value::Nil) => 0,
+                Some(v) => {
+                    let n = want_int(Some(v), line, "परिवृत्त()")?;
+                    if n < 0 {
+                        return Err(err(line, "स्थानानि ऋणात्मकानि न भवेयुः",
+                                       "places cannot be negative"));
+                    }
+                    n as usize
+                }
+            };
+            match vals.first() {
+                Some(v) if v.is_number() => {
+                    let d = v.as_decimal().ok_or_else(|| err(line,
+                        "परिवृत्त() शुद्धां सङ्ख्याम् अपेक्षते",
+                        "परिवृत्त() expects an exact number"))?;
+                    Ok(Value::Dec(d.round_half_up(places)))
+                }
+                _ => Err(err(line,
+                    "परिवृत्त() शुद्धां सङ्ख्याम् अपेक्षते (पूर्णाङ्कः वा दशमांशः)",
+                    "परिवृत्त() expects an exact number (पूर्णाङ्कः or दशमांशः)")),
+            }
+        }
         ("गणितम्", "निरपेक्षम्") => match vals.first() {
             Some(Value::Int(b)) => Ok(Value::Int(b.abs())),
             Some(Value::Dec(d)) => Ok(Value::Dec(
@@ -288,8 +355,9 @@ pub fn call(it: &mut Interp, module: &str, name: &str, vals: Vec<Value>, line: u
             let lo = want_int(vals.first(), line, "अन्तरे()")?;
             let hi = want_int(vals.get(1), line, "अन्तरे()")?;
             if hi < lo {
-                return Err(err(line, "अन्तरे(आदिः, अन्तः) — अन्तः न्यूनः",
-                               "अन्तरे(low, high) — high is less than low"));
+                return Err(errk(line, "अन्तरे(आदिः, अन्तः) — अन्तः न्यूनः",
+                                "अन्तरे(low, high) — high is less than low",
+                                "सीमादोषः"));
             }
             let span = (hi - lo + 1) as u64;
             Ok(Value::int(lo + (next_rand() % span) as i64))
@@ -426,6 +494,117 @@ pub fn call(it: &mut Interp, module: &str, name: &str, vals: Vec<Value>, line: u
             Ok(Value::list(out))
         }
 
+        ("सूचीकर्म", "क्रमय") => {
+            // क्रमय(सूची) sorts; क्रमय(सूची, विधिः) sorts by what विधिः returns.
+            // Stable, and numbers sort before text — mixing types in one सूची is
+            // unusual, and this beats refusing to sort at all.
+            let items = want_list(vals.first(), line, "क्रमय()")?;
+            let keyfn = vals.get(1).cloned();
+            let mut keyed: Vec<(Value, Value)> = Vec::with_capacity(items.len());
+            for v in items {
+                let k = match &keyfn {
+                    Some(f) => it.apply(f, vec![v.clone()], line)?,
+                    None => v.clone(),
+                };
+                keyed.push((k, v));
+            }
+            let mut err: Option<String> = None;
+            keyed.sort_by(|a, b| {
+                if err.is_some() {
+                    return std::cmp::Ordering::Equal;
+                }
+                match sort_cmp(it, &a.0, &b.0, line) {
+                    Ok(o) => o,
+                    Err(e) => { err = Some(e); std::cmp::Ordering::Equal }
+                }
+            });
+            if let Some(e) = err {
+                return Err(e);
+            }
+            Ok(Value::list(keyed.into_iter().map(|(_, v)| v).collect()))
+        }
+        ("सूचीकर्म", "सङ्गमः") => {
+            let a = want_list(vals.first(), line, "सङ्गमः()")?;
+            let b = want_list(vals.get(1), line, "सङ्गमः()")?;
+            let mut out: Vec<Value> = Vec::new();
+            for v in a.into_iter().chain(b) {
+                if !out.iter().any(|x| *x == v) {
+                    out.push(v);
+                }
+            }
+            Ok(Value::list(out))
+        }
+        ("सूचीकर्म", "सम्पातः") => {
+            let a = want_list(vals.first(), line, "सम्पातः()")?;
+            let b = want_list(vals.get(1), line, "सम्पातः()")?;
+            let mut out: Vec<Value> = Vec::new();
+            for v in a {
+                if b.iter().any(|x| *x == v) && !out.iter().any(|x| *x == v) {
+                    out.push(v);
+                }
+            }
+            Ok(Value::list(out))
+        }
+        ("सूचीकर्म", "भेदः") => {
+            let a = want_list(vals.first(), line, "भेदः()")?;
+            let b = want_list(vals.get(1), line, "भेदः()")?;
+            Ok(Value::list(a.into_iter()
+                .filter(|v| !b.iter().any(|x| x == v)).collect()))
+        }
+
+        // ---------------- वाक्यकर्म.आकारय ----------------
+        ("वाक्यकर्म", "आकारय") => {
+            let pat = want_str(vals.first(), line, "आकारय()")?;
+            let args = &vals[1.min(vals.len())..];
+            let parts: Vec<&str> = pat.split("{}").collect();
+            if parts.len() - 1 != args.len() {
+                return Err(err(line,
+                    &format!("आकारय(): {} स्थानानि, {} मूल्यानि",
+                             dev_digits(&(parts.len() - 1).to_string()),
+                             dev_digits(&args.len().to_string())),
+                    &format!("आकारय(): {} placeholders but {} values",
+                             parts.len() - 1, args.len())));
+            }
+            let mut out = String::from(parts[0]);
+            for (v, tail) in args.iter().zip(parts[1..].iter()) {
+                out.push_str(&it.display(v));
+                out.push_str(tail);
+            }
+            Ok(Value::Str(out))
+        }
+
+        ("वाक्यकर्म", "पूरय") => {
+            // Padding counts CHARACTERS, not display columns: a Devanagari
+            // conjunct may render narrower than a Latin letter, so a padded
+            // column is approximately aligned. Said plainly rather than
+            // pretended otherwise.
+            let text = match vals.first() {
+                Some(Value::Str(s)) => s.clone(),
+                Some(other) => it.display(other),
+                None => return Err(err(line, "पूरय(पाठः, विस्तारः)",
+                                       "पूरय(text, width)")),
+            };
+            let width = want_int(vals.get(1), line, "पूरय()")?;
+            let pad = width.abs() - text.chars().count() as i64;
+            if pad <= 0 {
+                return Ok(Value::Str(text));
+            }
+            let spaces: String = " ".repeat(pad as usize);
+            Ok(Value::Str(if width < 0 { format!("{}{}", spaces, text) }
+                          else { format!("{}{}", text, spaces) }))
+        }
+
+        // ---------------- नियमितम् ----------------
+        // Regular expressions live only in the reference engine for now. वेगः
+        // has no external crates by design, and a hand-written engine that is
+        // not byte-identical to the reference would be worse than none: it
+        // would make the same pattern mean two things. Saying so plainly is the
+        // honest option until the subset engine lands.
+        ("नियमितम्", _) => Err(err(line,
+            "नियमितम् वेगे नास्ति — मूल-इञ्जिने (sanskrita.py) प्रयुज्यताम्",
+            "नियमितम् (regex) is not in the वेगः engine yet — run this program \
+             with the reference engine (sanskrita.py). Tracked in AUDIT.md.")),
+
         // ---------------- सञ्चिका (files — UTF-8, always) ----------------
         ("सञ्चिका", "पठ") => {
             let path = want_str(vals.first(), line, "पठ()")?;
@@ -477,6 +656,194 @@ pub fn call(it: &mut Interp, module: &str, name: &str, vals: Vec<Value>, line: u
             Ok(Value::list(names.into_iter().map(Value::Str).collect()))
         }
 
+        // ---------------- सारणी (CSV, RFC 4180) ----------------
+        // Every field comes back as वाक्यम्. Numbers are never guessed at —
+        // converting is your decision, made with सङ्ख्या(), not a silent one.
+        ("सारणी", "विश्लेषय") => {
+            let text = want_str(vals.first(), line, "विश्लेषय()")?;
+            let sep = csv_sep(vals.get(1), line)?;
+            Ok(Value::list(csv_parse(&text, sep).into_iter()
+                .map(|row| Value::list(row.into_iter().map(Value::Str).collect()))
+                .collect()))
+        }
+        ("सारणी", "कोशाः") => {
+            let text = want_str(vals.first(), line, "कोशाः()")?;
+            let sep = csv_sep(vals.get(1), line)?;
+            let rows = csv_parse(&text, sep);
+            if rows.is_empty() {
+                return Ok(Value::list(Vec::new()));
+            }
+            let head = &rows[0];
+            let mut out = Vec::new();
+            for row in &rows[1..] {
+                let mut m = crate::value::MapData::default();
+                for (i, cell) in row.iter().enumerate() {
+                    let key = head.get(i).cloned()
+                        .unwrap_or_else(|| (i + 1).to_string());
+                    m.insert(crate::value::Key::Str(key), Value::Str(cell.clone()));
+                }
+                out.push(Value::map(m));
+            }
+            Ok(Value::list(out))
+        }
+        ("सारणी", "पाठय") => {
+            let rows = want_list(vals.first(), line, "पाठय()")?;
+            let sep = csv_sep(vals.get(1), line)?;
+            let mut out = String::new();
+            let map_style = matches!(rows.first(), Some(Value::Map(_)));
+            let mut head: Vec<crate::value::Key> = Vec::new();
+            if map_style {
+                if let Some(Value::Map(m)) = rows.first() {
+                    head = m.borrow().order.clone();
+                }
+                let names: Vec<String> = head.iter().map(|k| match k {
+                    crate::value::Key::Str(s) => s.clone(),
+                    crate::value::Key::Int(n) => dev_digits(n),
+                }).collect();
+                csv_row(&names, sep, &mut out);
+            }
+            for r in &rows {
+                match r {
+                    Value::Map(m) if map_style => {
+                        let b = m.borrow();
+                        let cells: Vec<String> = head.iter()
+                            .map(|k| b.get(k).map(|v| csv_cell(it, v))
+                                 .unwrap_or_default()).collect();
+                        csv_row(&cells, sep, &mut out);
+                    }
+                    Value::List(l) => {
+                        let cells: Vec<String> = l.borrow().iter()
+                            .map(|v| csv_cell(it, v)).collect();
+                        csv_row(&cells, sep, &mut out);
+                    }
+                    _ => return Err(err(line,
+                        "पाठय() प्रतिपङ्क्ति सूचीं कोशं वा अपेक्षते",
+                        "पाठय() expects each row to be a सूची or a कोशः")),
+                }
+            }
+            Ok(Value::Str(out))
+        }
+
+        // ---------------- गूढ ----------------
+        // Note what is deliberately absent: encryption. A language this young
+        // has no business holding anyone's secrets.
+        ("गूढ", "सङ्क्षेपः") => {
+            let text = want_str(vals.first(), line, "सङ्क्षेपः()")?;
+            let algo = match vals.get(1) {
+                Some(Value::Str(s)) => ascii_digits(s).to_lowercase(),
+                None => "sha256".to_string(),
+                _ => return Err(err(line, "सङ्क्षेपः() विधिं वाक्यरूपेण अपेक्षते",
+                                    "सङ्क्षेपः() expects the algorithm as text")),
+            };
+            match algo.as_str() {
+                "sha256" => Ok(Value::Str(hex(&sha256(text.as_bytes())))),
+                other => Err(err(line,
+                    &format!("'{}' इति विधिः वेगे नास्ति — sha256 एव", other),
+                    &format!("'{}' is not available in वेगः — only sha256 is \
+                              implemented here (the reference engine has \
+                              sha512, sha1 and md5 too)", other))),
+            }
+        }
+        ("गूढ", "एकाकी") => Ok(Value::Str(uuid4())),
+        ("गूढ", "गूढय") => {
+            let t = want_str(vals.first(), line, "गूढय()")?;
+            Ok(Value::Str(b64_encode(t.as_bytes())))
+        }
+        ("गूढ", "प्रकटय") => {
+            let t = want_str(vals.first(), line, "प्रकटय()")?;
+            let bytes = b64_decode(&t).ok_or_else(|| err(line,
+                "अशुद्धं base64", "not valid base64"))?;
+            String::from_utf8(bytes).map(Value::Str).map_err(|_| err(line,
+                "base64 अन्तर्गतं UTF-8 न", "base64 did not contain UTF-8 text"))
+        }
+
+        // ---------------- परिवेशः ----------------
+        ("परिवेशः", "चरः") => {
+            let name_ = want_str(vals.first(), line, "चरः()")?;
+            match std::env::var(&name_) {
+                Ok(v) => Ok(Value::Str(v)),
+                Err(_) => Ok(vals.get(1).cloned().unwrap_or(Value::Nil)),
+            }
+        }
+        ("परिवेशः", "चराः") => {
+            let mut m = crate::value::MapData::default();
+            let mut pairs: Vec<(String, String)> = std::env::vars().collect();
+            pairs.sort();                       // deterministic, so tests can rely on it
+            for (k, v) in pairs {
+                m.insert(crate::value::Key::Str(k), Value::Str(v));
+            }
+            Ok(Value::map(m))
+        }
+        ("परिवेशः", "निर्गम") => {
+            let code = match vals.first() {
+                None | Some(Value::Nil) => 0,
+                Some(v) => want_int(Some(v), line, "निर्गम()")?,
+            };
+            use std::io::Write;
+            let _ = std::io::stdout().flush();
+            std::process::exit(code as i32);
+        }
+        ("परिवेशः", "दोषवद") => {
+            let parts: Vec<String> = vals.iter().map(|v| it.display(v)).collect();
+            eprintln!("{}", parts.join(" "));
+            Ok(Value::Nil)
+        }
+        ("परिवेशः", "कार्यसूचिका") => Ok(Value::Str(
+            std::env::current_dir().map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_default())),
+        ("परिवेशः", "मञ्चः") => Ok(Value::Str(
+            if cfg!(target_os = "macos") { "Darwin" }
+            else if cfg!(target_os = "windows") { "Windows" }
+            else if cfg!(target_os = "linux") { "Linux" }
+            else { "अज्ञातः" }.to_string())),
+
+        // ---------------- लेखनी ----------------
+        // Logs go to stderr so they never contaminate a program's real output.
+        ("लेखनी", "स्तरः") => {
+            let want = want_str(vals.first(), line, "स्तरः()")?;
+            match log_rank(&want) {
+                Some(r) => { LOG_LEVEL.with(|c| c.set(r)); Ok(Value::Nil) }
+                None => Err(err(line,
+                    &format!("'{}' इति स्तरः न ज्ञातः", want),
+                    &format!("unknown level '{}' — विवरणम्, सूचना, चेतावनी, \
+                              दोषः, महादोषः", want))),
+            }
+        }
+        ("लेखनी", "सञ्चिकायाम्") => {
+            let path = match vals.first() {
+                Some(Value::Str(s)) => Some(s.clone()),
+                None | Some(Value::Nil) => None,
+                _ => return Err(err(line, "सञ्चिकायाम्() मार्गं वाक्यरूपेण अपेक्षते",
+                                    "सञ्चिकायाम्() expects a path as text")),
+            };
+            LOG_FILE.with(|c| *c.borrow_mut() = path);
+            Ok(Value::Nil)
+        }
+        ("लेखनी", _) => {
+            let rank = log_rank(name).ok_or_else(|| err(line,
+                &format!("'{}' कोष्ठके 'लेखनी' नास्ति", name),
+                &format!("module 'लेखनी' has no '{}'", name)))?;
+            if rank < LOG_LEVEL.with(|c| c.get()) {
+                return Ok(Value::Nil);
+            }
+            let text: Vec<String> = vals.iter().map(|v| it.display(v)).collect();
+            let (y, m, d) = civil_from_days((unix_secs() / 86_400) as i64);
+            let stamp = dev_digits(&format!("{:04}-{:02}-{:02} {}", y, m, d, clock()));
+            let entry = format!("[{}] {}: {}", stamp, name, text.join(" "));
+            let path = LOG_FILE.with(|c| c.borrow().clone());
+            match path {
+                Some(p) => {
+                    use std::io::Write;
+                    if let Ok(mut f) = std::fs::OpenOptions::new()
+                        .create(true).append(true).open(&p) {
+                        let _ = writeln!(f, "{}", entry);
+                    }
+                }
+                None => eprintln!("{}", entry),
+            }
+            Ok(Value::Nil)
+        }
+
         // ---------------- जेसन ----------------
         ("जेसन", "विश्लेषय") => {
             let t = want_str(vals.first(), line, "विश्लेषय()")?;
@@ -490,9 +857,78 @@ pub fn call(it: &mut Interp, module: &str, name: &str, vals: Vec<Value>, line: u
         }
 
         // ---------------- कालः ----------------
+        // A date is ISO text ("२०२६-०७-२५"), because text is what files, JSON
+        // and users hand you. Devanagari or ASCII digits both parse.
         ("कालः", "अद्य") => Ok(Value::Str(dev_digits(&today()))),
         ("कालः", "संप्रति") => Ok(Value::Str(dev_digits(&clock()))),
-        ("कालः", "वर्षः") => Ok(Value::int(year())),
+        ("कालः", "कालमुद्रा") => Ok(Value::int(unix_secs() as i64)),
+        ("कालः", "वर्षः") | ("कालः", "मासः") | ("कालः", "दिनम्") => {
+            let (y, m, d) = match vals.first() {
+                None | Some(Value::Nil) => civil_from_days((unix_secs() / 86_400) as i64),
+                Some(v) => parse_date(v, line, name)?,
+            };
+            Ok(Value::int(match name {
+                "वर्षः" => y,
+                "मासः" => m as i64,
+                _ => d as i64,
+            }))
+        }
+        ("कालः", "वासरः") => {
+            const VARA: [&str; 7] = ["सोमवासरः", "मङ्गलवासरः", "बुधवासरः",
+                                     "गुरुवासरः", "शुक्रवासरः", "शनिवासरः",
+                                     "रविवासरः"];
+            let days = match vals.first() {
+                None | Some(Value::Nil) => (unix_secs() / 86_400) as i64,
+                Some(v) => {
+                    let (y, m, d) = parse_date(v, line, "वासरः()")?;
+                    days_from_civil(y, m, d)
+                }
+            };
+            // 1970-01-01 was a Thursday → index 3 in a Monday-first week
+            let idx = (((days % 7) + 7 + 3) % 7) as usize;
+            Ok(Value::Str(VARA[idx].to_string()))
+        }
+        ("कालः", "दिनयोगः") => {
+            let (y, m, d) = parse_date(vals.first().unwrap_or(&Value::Nil),
+                                       line, "दिनयोगः()")?;
+            let n = want_int(vals.get(1), line, "दिनयोगः()")?;
+            let (y2, m2, d2) = civil_from_days(days_from_civil(y, m, d) + n);
+            Ok(Value::Str(dev_digits(&format!("{:04}-{:02}-{:02}", y2, m2, d2))))
+        }
+        ("कालः", "अन्तरम्") => {
+            let (ya, ma, da) = parse_date(vals.first().unwrap_or(&Value::Nil),
+                                          line, "अन्तरम्()")?;
+            let (yb, mb, db) = parse_date(vals.get(1).unwrap_or(&Value::Nil),
+                                          line, "अन्तरम्()")?;
+            Ok(Value::int(days_from_civil(yb, mb, db) - days_from_civil(ya, ma, da)))
+        }
+        ("कालः", "पूर्वम्") => {
+            let (ya, ma, da) = parse_date(vals.first().unwrap_or(&Value::Nil),
+                                          line, "पूर्वम्()")?;
+            let (yb, mb, db) = parse_date(vals.get(1).unwrap_or(&Value::Nil),
+                                          line, "पूर्वम्()")?;
+            Ok(Value::Bool(days_from_civil(ya, ma, da) < days_from_civil(yb, mb, db)))
+        }
+        ("कालः", "शुद्धः") => Ok(Value::Bool(
+            parse_date(vals.first().unwrap_or(&Value::Nil), line, "शुद्धः()").is_ok())),
+        ("कालः", "रूपय") => {
+            let (y, m, d) = parse_date(vals.first().unwrap_or(&Value::Nil),
+                                       line, "रूपय()")?;
+            let pat = match vals.get(1) {
+                Some(Value::Str(s)) => ascii_digits(s),
+                None => "%Y-%m-%d".to_string(),
+                _ => return Err(err(line, "रूपय() आकारं वाक्यरूपेण अपेक्षते",
+                                    "रूपय() expects the pattern as text")),
+            };
+            Ok(Value::Str(dev_digits(&strftime(&pat, y, m, d))))
+        }
+        ("कालः", "अधिवर्षः") => {
+            let y = match vals.first() {
+                None | Some(Value::Nil) => civil_from_days((unix_secs() / 86_400) as i64).0,
+                Some(v) => want_int(Some(v), line, "अधिवर्षः()")?,
+            };
+            Ok(Value::Bool(y % 4 == 0 && (y % 100 != 0 || y % 400 == 0)))
+        }
         ("कालः", "क्षणविरामः") => {
             let secs = want_num(vals.first(), line, "क्षणविरामः()")?;
             if secs > 0.0 {
@@ -809,6 +1245,229 @@ mod json_tests {
     }
 }
 
+
+// ---- सारणी: CSV, hand-written to RFC 4180 (no crates) ----
+
+fn csv_sep(v: Option<&Value>, line: usize) -> RResult<char> {
+    match v {
+        None | Some(Value::Nil) => Ok(','),
+        Some(Value::Str(s)) => s.chars().next().ok_or_else(|| err(line,
+            "विभाजकः रिक्तः न भवेत्", "the delimiter cannot be empty")),
+        _ => Err(err(line, "विभाजकः वाक्यम् भवेत्",
+                     "the delimiter must be text")),
+    }
+}
+
+fn csv_parse(text: &str, sep: char) -> Vec<Vec<String>> {
+    let mut rows = Vec::new();
+    let mut row: Vec<String> = Vec::new();
+    let mut field = String::new();
+    let mut in_quotes = false;
+    let mut any = false;
+    let chars: Vec<char> = text.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        if in_quotes {
+            if c == '"' {
+                if chars.get(i + 1) == Some(&'"') {   // "" is a literal quote
+                    field.push('"');
+                    i += 2;
+                    continue;
+                }
+                in_quotes = false;
+            } else {
+                field.push(c);
+            }
+            i += 1;
+            continue;
+        }
+        match c {
+            '"' => { in_quotes = true; any = true; }
+            _ if c == sep => { row.push(std::mem::take(&mut field)); any = true; }
+            '\r' => {}
+            '\n' => {
+                row.push(std::mem::take(&mut field));
+                rows.push(std::mem::take(&mut row));
+                any = false;
+            }
+            _ => { field.push(c); any = true; }
+        }
+        i += 1;
+    }
+    if any || !field.is_empty() || !row.is_empty() {
+        row.push(field);
+        rows.push(row);
+    }
+    rows
+}
+
+fn csv_cell(it: &Interp, v: &Value) -> String {
+    match v {
+        Value::Nil => String::new(),
+        Value::Str(s) => s.clone(),
+        other => it.display(other),      // दशमांशः keeps its exact digits here
+    }
+}
+
+fn csv_row(cells: &[String], sep: char, out: &mut String) {
+    for (i, c) in cells.iter().enumerate() {
+        if i > 0 {
+            out.push(sep);
+        }
+        if c.contains(sep) || c.contains('"') || c.contains('\n') || c.contains('\r') {
+            out.push('"');
+            for ch in c.chars() {
+                if ch == '"' { out.push('"'); }
+                out.push(ch);
+            }
+            out.push('"');
+        } else {
+            out.push_str(c);
+        }
+    }
+    out.push('\n');
+}
+
+// ---- गूढ: SHA-256, base64 and UUID4, hand-written (no crates) ----
+
+const K256: [u32; 64] = [
+    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1,
+    0x923f82a4, 0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3,
+    0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786,
+    0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+    0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147,
+    0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13,
+    0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b,
+    0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+    0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a,
+    0x5b9cca4f, 0x682e6ff3, 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208,
+    0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+];
+
+fn sha256(data: &[u8]) -> [u8; 32] {
+    let mut h: [u32; 8] = [0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+                           0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19];
+    let mut msg = data.to_vec();
+    let bitlen = (data.len() as u64) * 8;
+    msg.push(0x80);
+    while msg.len() % 64 != 56 {
+        msg.push(0);
+    }
+    msg.extend_from_slice(&bitlen.to_be_bytes());
+
+    for block in msg.chunks(64) {
+        let mut w = [0u32; 64];
+        for i in 0..16 {
+            w[i] = u32::from_be_bytes([block[4 * i], block[4 * i + 1],
+                                       block[4 * i + 2], block[4 * i + 3]]);
+        }
+        for i in 16..64 {
+            let s0 = w[i - 15].rotate_right(7) ^ w[i - 15].rotate_right(18)
+                     ^ (w[i - 15] >> 3);
+            let s1 = w[i - 2].rotate_right(17) ^ w[i - 2].rotate_right(19)
+                     ^ (w[i - 2] >> 10);
+            w[i] = w[i - 16].wrapping_add(s0).wrapping_add(w[i - 7]).wrapping_add(s1);
+        }
+        let (mut a, mut b, mut c, mut d) = (h[0], h[1], h[2], h[3]);
+        let (mut e, mut f, mut g, mut hh) = (h[4], h[5], h[6], h[7]);
+        for i in 0..64 {
+            let s1 = e.rotate_right(6) ^ e.rotate_right(11) ^ e.rotate_right(25);
+            let ch = (e & f) ^ ((!e) & g);
+            let t1 = hh.wrapping_add(s1).wrapping_add(ch)
+                       .wrapping_add(K256[i]).wrapping_add(w[i]);
+            let s0 = a.rotate_right(2) ^ a.rotate_right(13) ^ a.rotate_right(22);
+            let maj = (a & b) ^ (a & c) ^ (b & c);
+            let t2 = s0.wrapping_add(maj);
+            hh = g; g = f; f = e;
+            e = d.wrapping_add(t1);
+            d = c; c = b; b = a;
+            a = t1.wrapping_add(t2);
+        }
+        for (i, v) in [a, b, c, d, e, f, g, hh].iter().enumerate() {
+            h[i] = h[i].wrapping_add(*v);
+        }
+    }
+    let mut out = [0u8; 32];
+    for (i, v) in h.iter().enumerate() {
+        out[4 * i..4 * i + 4].copy_from_slice(&v.to_be_bytes());
+    }
+    out
+}
+
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{:02x}", b)).collect()
+}
+
+const B64: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+fn b64_encode(data: &[u8]) -> String {
+    let mut out = String::new();
+    for chunk in data.chunks(3) {
+        let b = [chunk[0], *chunk.get(1).unwrap_or(&0), *chunk.get(2).unwrap_or(&0)];
+        let n = ((b[0] as u32) << 16) | ((b[1] as u32) << 8) | b[2] as u32;
+        out.push(B64[(n >> 18) as usize & 63] as char);
+        out.push(B64[(n >> 12) as usize & 63] as char);
+        out.push(if chunk.len() > 1 { B64[(n >> 6) as usize & 63] as char } else { '=' });
+        out.push(if chunk.len() > 2 { B64[n as usize & 63] as char } else { '=' });
+    }
+    out
+}
+
+fn b64_decode(text: &str) -> Option<Vec<u8>> {
+    let mut bits: Vec<u8> = Vec::new();
+    for c in text.chars() {
+        if c == '=' || c.is_whitespace() {
+            continue;
+        }
+        bits.push(B64.iter().position(|b| *b as char == c)? as u8);
+    }
+    let mut out = Vec::new();
+    for chunk in bits.chunks(4) {
+        let mut n: u32 = 0;
+        for (i, v) in chunk.iter().enumerate() {
+            n |= (*v as u32) << (18 - 6 * i);
+        }
+        let bytes = match chunk.len() { 2 => 1, 3 => 2, 4 => 3, _ => return None };
+        for i in 0..bytes {
+            out.push(((n >> (16 - 8 * i)) & 0xFF) as u8);
+        }
+    }
+    Some(out)
+}
+
+/// A version-4 UUID from the same xorshift source as यादृच्छिकम्.
+fn uuid4() -> String {
+    let mut b = [0u8; 16];
+    for chunk in b.chunks_mut(8) {
+        let r = next_rand().to_le_bytes();
+        chunk.copy_from_slice(&r[..chunk.len()]);
+    }
+    b[6] = (b[6] & 0x0F) | 0x40;      // version 4
+    b[8] = (b[8] & 0x3F) | 0x80;      // variant 1
+    let h = hex(&b);
+    format!("{}-{}-{}-{}-{}", &h[0..8], &h[8..12], &h[12..16], &h[16..20], &h[20..32])
+}
+
+// ---- लेखनी: level and destination, per thread ----
+
+thread_local! {
+    static LOG_LEVEL: std::cell::Cell<u8> = const { std::cell::Cell::new(20) };
+    static LOG_FILE: std::cell::RefCell<Option<String>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+fn log_rank(name: &str) -> Option<u8> {
+    match name {
+        "विवरणम्" => Some(10),
+        "सूचना" => Some(20),
+        "चेतावनी" => Some(30),
+        "दोषः" => Some(40),
+        "महादोषः" => Some(50),
+        _ => None,
+    }
+}
+
 // ---- tiny helpers (no external crates) ----
 
 fn unix_secs() -> u64 {
@@ -841,6 +1500,90 @@ fn next_rand() -> u64 {
     })
 }
 
+/// Devanagari digits → ASCII, so every कालः function takes either script.
+fn ascii_digits(s: &str) -> String {
+    s.chars().map(|c| match c {
+        '०'..='९' => char::from(b'0' + (c as u32 - '०' as u32) as u8),
+        other => other,
+    }).collect()
+}
+
+/// Parse a date written as text. Four shapes are accepted, matching the
+/// reference: Y-M-D, Y/M/D, D-M-Y, D/M/Y.
+fn parse_date(v: &Value, line: usize, who: &str) -> RResult<(i64, u32, u32)> {
+    let text = match v {
+        Value::Str(s) => ascii_digits(s.trim()),
+        _ => return Err(err(line,
+            &format!("{} दिनाङ्कं वाक्यरूपेण अपेक्षते", who),
+            &format!("{} expects a date as text, e.g. \"२०२६-०७-२५\"", who))),
+    };
+    let bad = || err(line,
+        &format!("'{}' इति दिनाङ्कः न ज्ञातः", text),
+        &format!("'{}' is not a date I recognise (try २०२६-०७-२५)", text));
+    let sep = if text.contains('-') { '-' } else { '/' };
+    let parts: Vec<&str> = text.split(sep).collect();
+    if parts.len() != 3 {
+        return Err(bad());
+    }
+    let n: Vec<i64> = parts.iter().map(|p| p.parse::<i64>().unwrap_or(-1)).collect();
+    if n.iter().any(|x| *x < 0) {
+        return Err(bad());
+    }
+    // four digits first means Y-M-D; otherwise D-M-Y
+    let (y, m, d) = if parts[0].len() == 4 { (n[0], n[1], n[2]) }
+                    else { (n[2], n[1], n[0]) };
+    if !(1..=12).contains(&m) || !(1..=31).contains(&d) {
+        return Err(bad());
+    }
+    // reject the impossible: 31 April, 30 February, 29 February in a common year
+    let leap = y % 4 == 0 && (y % 100 != 0 || y % 400 == 0);
+    let len = [31, if leap { 29 } else { 28 }, 31, 30, 31, 30,
+               31, 31, 30, 31, 30, 31][(m - 1) as usize];
+    if d > len {
+        return Err(bad());
+    }
+    Ok((y, m as u32, d as u32))
+}
+
+/// Days since 1970-01-01 (Howard Hinnant's algorithm, the inverse of
+/// civil_from_days).
+fn days_from_civil(y: i64, m: u32, d: u32) -> i64 {
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = if y >= 0 { y } else { y - 399 } / 400;
+    let yoe = (y - era * 400) as u64;
+    let mp = if m > 2 { m - 3 } else { m + 9 } as u64;
+    let doy = (153 * mp + 2) / 5 + (d as u64 - 1);
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    era * 146_097 + doe as i64 - 719_468
+}
+
+/// The strftime directives a date can use. Anything else is copied through.
+fn strftime(pat: &str, y: i64, m: u32, d: u32) -> String {
+    const MON: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                             "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    let mut out = String::new();
+    let chars: Vec<char> = pat.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == '%' && i + 1 < chars.len() {
+            match chars[i + 1] {
+                'Y' => out.push_str(&format!("{:04}", y)),
+                'y' => out.push_str(&format!("{:02}", y % 100)),
+                'm' => out.push_str(&format!("{:02}", m)),
+                'd' => out.push_str(&format!("{:02}", d)),
+                'b' => out.push_str(MON[(m - 1) as usize]),
+                '%' => out.push('%'),
+                other => { out.push('%'); out.push(other); }
+            }
+            i += 2;
+            continue;
+        }
+        out.push(chars[i]);
+        i += 1;
+    }
+    out
+}
+
 /// Civil date from a Unix timestamp (Howard Hinnant's algorithm).
 fn civil_from_days(z: i64) -> (i64, u32, u32) {
     let z = z + 719_468;
@@ -867,4 +1610,94 @@ fn year() -> i64 {
 fn clock() -> String {
     let s = unix_secs() % 86_400;
     format!("{:02}:{:02}:{:02}", s / 3600, (s % 3600) / 60, s % 60)
+}
+
+#[cfg(test)]
+mod tier2_tests {
+    use super::*;
+
+    // verified against Python's hashlib for the same inputs
+    #[test]
+    fn sha256_matches_the_reference() {
+        assert_eq!(hex(&sha256(b"")),
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+        assert_eq!(hex(&sha256("नमस्ते".as_bytes())),
+            "ddb08d77c2d511947652161b35987022711aa216387b041dd459a03eb66a8304");
+        assert_eq!(hex(&sha256(b"abc")),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+        // the block-boundary cases where padding usually goes wrong
+        assert_eq!(hex(&sha256(&[b'a'; 55])),
+            "9f4390f8d30c2dd92ec9f095b65e2b9ae9b0a925a5258e241c9f1e910f734318");
+        assert_eq!(hex(&sha256(&[b'a'; 56])),
+            "b35439a4ac6f0948b6d6f9e3c6af0f5f590ce20f1bde7090ef7970686ec6738a");
+    }
+
+    #[test]
+    fn base64_round_trips() {
+        assert_eq!(b64_encode("नमस्ते".as_bytes()), "4KSo4KSu4KS44KWN4KSk4KWH");
+        assert_eq!(b64_encode(b"a"), "YQ==");
+        assert_eq!(b64_encode(b"ab"), "YWI=");
+        assert_eq!(b64_encode(b"abc"), "YWJj");
+        for t in ["", "a", "ab", "abc", "नमस्ते जगत्"] {
+            let e = b64_encode(t.as_bytes());
+            assert_eq!(String::from_utf8(b64_decode(&e).unwrap()).unwrap(), t);
+        }
+        assert!(b64_decode("!!!").is_none());
+    }
+
+    #[test]
+    fn uuid4_has_the_right_shape() {
+        let u = uuid4();
+        assert_eq!(u.len(), 36);
+        let parts: Vec<&str> = u.split('-').collect();
+        assert_eq!(parts.iter().map(|p| p.len()).collect::<Vec<_>>(),
+                   vec![8, 4, 4, 4, 12]);
+        assert!(u.as_bytes()[14] == b'4');                       // version
+        assert!("89ab".contains(u.chars().nth(19).unwrap()));    // variant
+        assert_ne!(uuid4(), uuid4());
+    }
+
+    #[test]
+    fn csv_handles_quotes_commas_and_newlines() {
+        let rows = csv_parse("नाम,नगरम्\n\"शर्मा, राम\",काशी\n", ',');
+        assert_eq!(rows, vec![vec!["नाम", "नगरम्"], vec!["शर्मा, राम", "काशी"]]);
+        // "" inside a quoted field is one literal quote
+        assert_eq!(csv_parse("\"a\"\"b\"\n", ','), vec![vec!["a\"b"]]);
+        // a newline inside quotes does not end the row
+        assert_eq!(csv_parse("\"one\ntwo\",x\n", ','),
+                   vec![vec!["one\ntwo", "x"]]);
+    }
+
+    #[test]
+    fn csv_quotes_only_what_needs_it() {
+        let mut out = String::new();
+        csv_row(&["अ".into(), "ब, स".into(), "d\"e".into()], ',', &mut out);
+        assert_eq!(out, "अ,\"ब, स\",\"d\"\"e\"\n");
+    }
+
+    #[test]
+    fn dates_parse_shift_and_compare() {
+        assert_eq!(days_from_civil(1970, 1, 1), 0);
+        assert_eq!(days_from_civil(2026, 7, 25) - days_from_civil(2026, 1, 1), 205);
+        // round trip through both directions
+        for days in [0i64, 1, 12345, 20000, -1000] {
+            let (y, m, d) = civil_from_days(days);
+            assert_eq!(days_from_civil(y, m, d), days);
+        }
+        assert_eq!(strftime("%d/%m/%Y", 2026, 7, 25), "25/07/2026");
+        assert_eq!(strftime("%Y-%m-%d", 2026, 7, 5), "2026-07-05");
+    }
+
+    #[test]
+    fn impossible_dates_are_rejected() {
+        let d = |s: &str| parse_date(&Value::Str(s.into()), 1, "test");
+        assert!(d("2026-07-25").is_ok());
+        assert!(d("२०२६-०७-२५").is_ok());        // Devanagari digits
+        assert!(d("25/07/2026").is_ok());        // D/M/Y
+        assert!(d("2026-02-29").is_err());       // not a leap year
+        assert!(d("2024-02-29").is_ok());        // leap year
+        assert!(d("2026-04-31").is_err());
+        assert!(d("2026-13-01").is_err());
+        assert!(d("कदापि").is_err());
+    }
 }

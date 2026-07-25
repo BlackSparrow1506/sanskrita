@@ -1,0 +1,72 @@
+name: दोषः / Bug report
+description: Something in संस्कृता behaves wrongly
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        धन्यवादः — thank you for reporting this.
+
+        **Security problem?** Do not file it here. See
+        [SECURITY.md](../../SECURITY.md) and email instead.
+
+  - type: textarea
+    id: program
+    attributes:
+      label: The smallest program that shows it
+      description: Please reduce it as far as you can — a 5-line repro is worth ten paragraphs.
+      render: text
+      placeholder: |
+        मानय क = ०.१ + ०.२।
+        वद(क)।
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected, and what you got
+      placeholder: |
+        expected: ०.३
+        got:      ०.३०००००००००००००००४
+    validations:
+      required: true
+
+  - type: dropdown
+    id: engine
+    attributes:
+      label: Which engine
+      options:
+        - reference (sanskrita.py) — the default
+        - वेगः (sanskrita --veg)
+        - both
+        - --druta (experimental compiled mode)
+        - browser playground
+        - VS Code extension
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Output of `sanskrita --version`
+      placeholder: "संस्कृता (Sanskrita) v0.4.0 — फलम्"
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating system and Python version
+      placeholder: "macOS 15.2, Python 3.11.7"
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: "`python3 परीक्षा.py` passes on my checkout (or I've said below that it doesn't)"
+        - label: I searched existing issues

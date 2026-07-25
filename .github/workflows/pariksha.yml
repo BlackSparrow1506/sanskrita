@@ -18,6 +18,8 @@ jobs:
           node-version: "20"
       - name: Run the suite
         run: python3 परीक्षा.py
+      - name: Property-based test (reference engine)
+        run: python3 यादृच्छिकपरीक्षा.py --count 400 --seed 1 --only-reference
 
   vegah:
     name: वेगः (Rust engine)
@@ -41,3 +43,7 @@ jobs:
         working-directory: rust-engine
       - name: differential test vs Python reference
         run: python3 तुल्यता.py
+      - name: property-based differential test (random programs, both engines)
+        run: python3 यादृच्छिकपरीक्षा.py --count 400 --seed 1
+      - name: benchmarks regenerate cleanly (§7c)
+        run: python3 मापनम्.py --repeat 1 --dry-run > /dev/null

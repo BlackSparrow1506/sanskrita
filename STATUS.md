@@ -1,6 +1,6 @@
 # STATUS — what संस्कृता actually does, promise by promise
 
-*Last audited: 25 July 2026 · engine v0.4.0 "फलम्" · Phases 1–3*
+*Last audited: 25 July 2026 · engine v0.5.0 "फलम्" · Phases 1–3*
 
 This file exists so nobody has to guess. Every commitment made in the design
 document for Phases 1–3 is listed below with an honest verdict: **shipped**,
@@ -8,9 +8,17 @@ document for Phases 1–3 is listed below with an honest verdict: **shipped**,
 deferred are *not* failures — they belong to a later phase and are listed so the
 boundary is visible rather than blurred.
 
-Verification for every "shipped" row: `python3 परीक्षा.py` (conformance),
-`cargo test` in `rust-engine/` (unit), `python3 तुल्यता.py` (both engines must
-produce byte-identical output).
+Verification for every "shipped" row — four layers, all in CI:
+
+| Layer | Command | What it proves |
+|---|---|---|
+| Unit | `cd rust-engine && cargo test` | वेगः internals |
+| Conformance | `python3 परीक्षा.py` | every documented behaviour, every example |
+| Differential | `python3 तुल्यता.py` | the two engines are byte-identical |
+| Property | `python3 यादृच्छिकपरीक्षा.py` | *random* programs agree and never crash |
+
+The property layer is the one that finds what we did not think of. It found
+two real bugs on its first run — see §8.
 
 ---
 
@@ -29,6 +37,8 @@ produce byte-identical output).
 | प्रत्येकम् … इति for-each | shipped | `examples/नियन्त्रणम्.सं` |
 | वर्गः classes, सृज, अयम्, inheritance | shipped | `examples/वर्गाः.सं` |
 | प्रयत / दोषे error handling | shipped | `examples/दोषनिवारणम्.सं` |
+| **Errors are values** — `.सन्देशः .आङ्ग्लसन्देशः .पङ्क्तिः .प्रकारः .अनुरेखा`, re-raisable with `क्षिप त्रु।` | shipped (v0.5) | `examples/दोषविवरणम्.सं` |
+| **Stack traces** — an uncaught error names every विधि it escaped | shipped (v0.5) | `examples/दोषविवरणम्.सं` |
 | क्षिप — raise your own error | shipped (v0.4) | `examples/स्वपरीक्षा.सं` |
 | Lambdas (anonymous विधि) | shipped | `examples/प्रतिमानानि.सं` |
 | आनय — import your own `.सं` files | shipped | `examples/स्वपरीक्षा.सं` |
@@ -47,7 +57,7 @@ produce byte-identical output).
 | `०.१ + ०.२ ≠ ०.३` | exact दशमांशः by default; **द्रुतदशमांशः** is the opt-in fast binary float | shipped (v0.4) |
 | Slow interpreted loops | native वेगः engine (Rust), `--druta` compiled mode | shipped (see §5) |
 | Checked-exception clutter / silent failures | one प्रयत/दोषे model, errors carry line + suggestion | shipped |
-| Cryptic beginner errors | Sanskrit + English on every error | shipped |
+| Cryptic beginner errors | Sanskrit + English on every error, **plus a full call stack and a machine-readable kind** | shipped |
 
 `प्राक्परीक्षा` is deliberately conservative: it reports only what it can
 **prove** from the source (literal-typed declarations, provable text/number
@@ -58,14 +68,19 @@ whole-program type inference pass is Phase 4 work, and is listed as such below.
 
 | Module | Contents | Status |
 |---|---|---|
-| **गणितम्** | वर्गमूलम्, घातः, लघुगणकः, ज्या, कोज्या, स्पर्शज्या, तलम्, उपरितलम्, निरपेक्षम्, पाई, ई | shipped |
-| **वाक्यकर्म** | विभज, संयोजय, खोज, प्रतिस्थापय, अंश, उच्च, निम्न, परिष्कार, आरभते, अन्तयति, अन्तर्भवति | shipped |
+| **गणितम्** | वर्गमूलम्, घातः, लघुगणकः, ज्या, कोज्या, स्पर्शज्या, तलम्, उपरितलम्, निरपेक्षम्, **परिवृत्त** (round half-away-from-zero), पाई, ई | shipped |
+| **वाक्यकर्म** | विभज, संयोजय, खोज, प्रतिस्थापय, अंश, उच्च, निम्न, परिष्कार, आरभते, अन्तयति, अन्तर्भवति, **आकारय**, **पूरय** | shipped |
 | **सूचीकर्म** | छानय, प्रतिचित्रय, न्यूनीकरण, विपर्यय, अन्तर्भवति, अनुक्रमः, योगः, महत्तमम्, लघुत्तमम्, अद्वितीयम् | shipped (v0.4) |
-| **कालः** | अद्य, संप्रति, वर्षः, क्षणविरामः | shipped |
+| **कालः** | अद्य, संप्रति, कालमुद्रा, वर्षः, मासः, दिनम्, वासरः, दिनयोगः, अन्तरम्, पूर्वम्, शुद्धः, रूपय, अधिवर्षः, क्षणविरामः | shipped |
 | **सञ्चिका** | पठ, लिख, योजय, अस्ति, निष्कासय, पङ्क्तयः, सूचिका | shipped (v0.4) |
 | **जेसन** | विश्लेषय, पाठय — a decimal survives the round trip exactly, scale and all, because it never becomes a float | shipped (v0.4) |
 | **यादृच्छिकम्** | अन्तरे, वरय, भिन्नम् | shipped |
 | **संस्कृतम्** | अक्षराणि, अक्षरगणना, मात्राः, छन्दः, रोमनय, देवनागरय, संधय | shipped |
+| **सारणी** (CSV) | विश्लेषय, कोशाः, पाठय — RFC 4180 quoting; every field arrives as वाक्यम्, never guessed | shipped |
+| **नियमितम्** (regex) | मेलति, आदिमेलति, खोज, सर्वाणि, स्थानम्, प्रतिस्थापय, विभज, समूहाः | **reference engine only** — see §7 |
+| **गूढ** | सङ्क्षेपः (SHA-256), एकाकी (UUID4), गूढय/प्रकटय (base64). No encryption, deliberately | shipped |
+| **परिवेशः** | चरः, चराः, निर्गम, दोषवद, कार्यसूचिका, मञ्चः — what makes a program scriptable | shipped |
+| **लेखनी** | विवरणम्, सूचना, चेतावनी, दोषः, महादोषः, स्तरः, सञ्चिकायाम् — on stderr, so logs never pollute output | shipped |
 | **कृत्रिमबुद्धिः** (AI/ML) | — | deferred to Phase 3–4 (today: via the Python bridge) |
 
 Sandhi-style composition (design §7d #2) is shipped: `.नाम` on a सूची, वाक्यम्
@@ -99,8 +114,13 @@ See `examples/शृङ्खला.सं`.
 
 We publish the unflattering number as loudly as the flattering one. A
 Python-hosted tree-walker *cannot* beat Python; that is exactly why वेगः exists.
-The §7c memory-benchmark rule (a table vs Python/Java/Rust every release) is
-honoured in `BENCHMARKS.md`.
+
+`मापनम्.py` now measures every implementation it can find on the machine —
+both संस्कृता engines, Python, Java, Rust and C — timing wall-clock and peak RSS
+in a separate process each, and rewrites `BENCHMARKS.md` from the results. Rows
+whose toolchain is absent are written in as *not measured*, naming what is
+missing; nothing is estimated. Regenerate with `python3 मापनम्.py --repeat 5`
+after `cargo build --release`, and §7c is satisfied.
 
 ## 6. Deferred by design — and to which phase
 
@@ -119,6 +139,25 @@ explicit rather than implied.
 | No-GC strict mode (OS, drivers, real-time) | 6 | |
 | Python bridge in वेगः | 4 | by design: the bridge is a bootstrap, not a foundation (risk #21). वेगः refuses `python:` imports with a clear message rather than pretending |
 
+## 7b. What the property tester found
+
+`यादृच्छिकपरीक्षा.py` generates random valid संस्कृता, runs it on both engines,
+and demands identical output and no crashes. On its **first run** it found two
+defects that four layers of hand-written tests had missed:
+
+1. **`+`, `-`, `*` on दशमांशः were silently rounded to 28 significant digits** in
+   the reference engine — Python's default decimal context. A large number plus
+   `०.०००१` simply lost the addend. The headline promise of the language was
+   false above 28 digits. Now exact at any size, in both engines.
+2. **`%` on a large दशमांशः raised an unhandled Python exception**
+   (`DivisionImpossible`) — an engine crash, not a संस्कृता error. Both engines
+   now compute the floored remainder on the unscaled integers: no precision
+   ceiling, no rounding step, so `(०-७.५) % ३` is `१.५` in both.
+
+Both are locked in as conformance cases, differential cases, and Rust unit
+tests. This is what the layer is for, and it is worth running with a large
+`--count` before any release.
+
 ## 7. Known, tracked divergences between the two engines
 
 The differential harness (`तुल्यता.py`) is the contract: every listed program
@@ -129,9 +168,16 @@ openly, never hidden.
 decimal division, division result type) were closed in slice 5 and promoted into
 the always-checked set.
 
-One *intentional* difference remains, documented rather than "fixed":
+Two differences remain, documented rather than hidden:
 
-- `आनय "python:…"` works only in the reference engine. वेगः reports a clear
+1. **`नियमितम्` (regex) is reference-engine only.** वेगः has no external crates
+   by design, and a hand-written regex engine that was not byte-identical to
+   Python's `re` would be worse than none — the same pattern would quietly mean
+   two things. वेगः refuses `नियमितम्` with a clear bilingual message naming the
+   engine to use. A documented *subset* engine is the next वेगः slice; until it
+   exists and passes the differential harness, this stays an honest gap rather
+   than a silent one.
+2. `आनय "python:…"` works only in the reference engine. वेगः reports a clear
   bilingual error telling you which engine to use. This is by design — the
   bridge is a bootstrap, not a foundation (risk #21).
 

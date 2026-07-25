@@ -80,6 +80,10 @@ pub enum Value {
     Native(&'static str, &'static str),
     /// A user's own .सं file imported as a namespace
     UserModule(Rc<RefCell<HashMap<String, Value>>>, String),
+    /// दोषः — the value bound by `दोषे (त्रु)`. Prints as its Sanskrit message,
+    /// but answers .सन्देशः .आङ्ग्लसन्देशः .पङ्क्तिः .प्रकारः .अनुरेखा and can be
+    /// re-raised unchanged with `क्षिप त्रु।`.
+    Err(Rc<crate::err::SError>),
     /// §7d #2 — a stdlib function or builtin with its receiver already bound:
     /// `सूची.क्रमय`. The module is None for builtins (क्रमय, दैर्घ्यम्, …).
     BoundNative(Box<Value>, Option<&'static str>, &'static str),
@@ -145,6 +149,11 @@ impl Value {
         matches!(self, Value::Int(_) | Value::Dec(_))
     }
 
+    /// Any numeric value, exact or fast.
+    pub fn is_numeric(&self) -> bool {
+        matches!(self, Value::Int(_) | Value::Dec(_) | Value::Flt(_))
+    }
+
     /// Binary-float view — only for द्रुतदशमांशः arithmetic.
     pub fn as_f64(&self) -> Option<f64> {
         match self {
@@ -179,6 +188,7 @@ impl Value {
             Value::Class(_) => "वर्गः",
             Value::Object(_) => "वस्तु",
             Value::Module(_) | Value::UserModule(..) => "कोष्ठकम्",
+            Value::Err(_) => "दोषः",
         }
     }
 }
@@ -226,6 +236,7 @@ impl PartialEq for Value {
             (Value::Module(a), Value::Module(b)) => a == b,
             (Value::Native(m1, f1), Value::Native(m2, f2)) => m1 == m2 && f1 == f2,
             (Value::UserModule(a, _), Value::UserModule(b, _)) => Rc::ptr_eq(a, b),
+            (Value::Err(a), Value::Err(b)) => a.sa == b.sa && a.line == b.line,
             _ => false,
         }
     }

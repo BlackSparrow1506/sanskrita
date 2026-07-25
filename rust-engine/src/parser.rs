@@ -285,6 +285,7 @@ impl Parser {
             params.push(self.param()?);
             while self.is_op(",") {
                 self.advance();
+                if self.is_op(")") { break; }              // trailing comma
                 params.push(self.param()?);
             }
         }
@@ -486,6 +487,7 @@ impl Parser {
                     args.push(self.argument()?);
                     while self.is_op(",") {
                         self.advance();
+                        if self.is_op(")") { break; }      // trailing comma
                         args.push(self.argument()?);
                     }
                 }
