@@ -58,6 +58,10 @@ pub enum Value {
     Int(BigInt),
     /// दशमांशः — exact decimal
     Dec(Decimal),
+    /// द्रुतदशमांशः — IEEE-754 binary float. §2b: the fast path is OPT-IN.
+    /// You must ask for it by name, and the name says what you are trading:
+    /// द्रुत (fast), not शुद्ध (exact).
+    Flt(f64),
     Str(String),
     Bool(bool),
     Nil,
@@ -76,6 +80,9 @@ pub enum Value {
     Native(&'static str, &'static str),
     /// A user's own .सं file imported as a namespace
     UserModule(Rc<RefCell<HashMap<String, Value>>>, String),
+    /// §7d #2 — a stdlib function or builtin with its receiver already bound:
+    /// `सूची.क्रमय`. The module is None for builtins (क्रमय, दैर्घ्यम्, …).
+    BoundNative(Box<Value>, Option<&'static str>, &'static str),
 }
 
 /// Insertion-ordered map: Python dicts preserve insertion order, and our
@@ -121,6 +128,10 @@ impl Value {
         Value::List(Rc::new(RefCell::new(items)))
     }
 
+    pub fn map(data: MapData) -> Value {
+        Value::Map(Rc::new(RefCell::new(data)))
+    }
+
     /// Numeric view for arithmetic: integers promote to decimals when mixed.
     pub fn as_decimal(&self) -> Option<Decimal> {
         match self {
@@ -132,6 +143,16 @@ impl Value {
 
     pub fn is_number(&self) -> bool {
         matches!(self, Value::Int(_) | Value::Dec(_))
+    }
+
+    /// Binary-float view — only for द्रुतदशमांशः arithmetic.
+    pub fn as_f64(&self) -> Option<f64> {
+        match self {
+            Value::Flt(f) => Some(*f),
+            Value::Int(_) | Value::Dec(_) =>
+                self.as_decimal().and_then(|d| d.to_plain_string().parse::<f64>().ok()),
+            _ => None,
+        }
     }
 
     /// Convert to a map key (text or whole number only).
@@ -147,10 +168,12 @@ impl Value {
         match self {
             Value::Int(_) => "पूर्णाङ्कः",
             Value::Dec(_) => "दशमांशः",
+            Value::Flt(_) => "द्रुतदशमांशः",
             Value::Str(_) => "वाक्यम्",
             Value::Bool(_) => "सत्यासत्यम्",
             Value::Nil => "शून्यम्",
-            Value::Func(_) | Value::Bound(..) | Value::Native(..) => "विधिः",
+            Value::Func(_) | Value::Bound(..) | Value::Native(..)
+                | Value::BoundNative(..) => "विधिः",
             Value::List(_) => "सूची",
             Value::Map(_) => "कोशः",
             Value::Class(_) => "वर्गः",
@@ -166,6 +189,13 @@ impl PartialEq for Value {
             _ if self.is_number() && other.is_number() => {
                 match (self.as_decimal(), other.as_decimal()) {
                     (Some(a), Some(b)) => a.eq_value(&b),
+                    _ => false,
+                }
+            }
+            (Value::Flt(a), Value::Flt(b)) => a == b,
+            (Value::Flt(_), _) | (_, Value::Flt(_)) => {
+                match (self.as_f64(), other.as_f64()) {
+                    (Some(x), Some(y)) => x == y,
                     _ => false,
                 }
             }

@@ -1,6 +1,19 @@
-# ॐ संस्कृता (Sanskrita) v0.3 — फलम्
+# ॐ संस्कृता (Sanskrita) v0.4 — फलम् (Phase 3 complete)
 
-The Sanskrit programming language. Website: enable GitHub Pages → `docs/`. CI runs `परीक्षा.py` on every push.
+The Sanskrit programming language: Devanagari keywords, Pāṇinian kāraka
+arguments, exact decimal arithmetic, and a native Rust engine.
+
+**Two engines, one language.** `sanskrita.py` is the *reference* engine — it
+defines the language. **वेगः** (`rust-engine/`) is the native engine — a single
+fast binary with no runtime. Both must produce byte-identical output for every
+program; `तुल्यता.py` is what enforces that, on every push.
+
+📋 **[STATUS.md](STATUS.md)** — every design promise for Phases 1–3, with an
+honest verdict: shipped, partial, or deferred (and to which phase).
+Website: enable GitHub Pages → `docs/`. CI runs `परीक्षा.py` on every push.
+
+**हिन्दी में पढ़ें:** [docs/README.hi.md](docs/README.hi.md) ·
+**पारिभाषिकशब्दकोशः:** [docs/शब्दकोशः.md](docs/शब्दकोशः.md)
 
 ## Install
 
@@ -18,10 +31,14 @@ cd sanskrita && bash install.sh
 Then from anywhere:
 
 ```bash
-sanskrita examples/नमस्ते.सं     # run a program  →  नमस्ते जगत्
-sanskrita                        # interactive REPL
-sanskrita-playground             # browser playground (perfect Devanagari)
+sanskrita examples/नमस्ते.सं          # run a program  →  नमस्ते जगत्
+sanskrita                             # interactive REPL
+sanskrita --veg examples/नमस्ते.सं    # same program on the native वेगः engine
+sanskrita-playground                  # browser playground (perfect Devanagari)
 ```
+
+The first `--veg` run builds the native engine (needs [Rust](https://rustup.rs));
+after that it is a single binary and starts instantly.
 
 If `sanskrita` isn't found, the installer printed a PATH line to add to `~/.zshrc` — paste it, open a new terminal.
 
@@ -32,9 +49,17 @@ python sanskrita.py examples\नमस्ते.सं
 python playground.py
 ```
 
-**Useful flags:** `--roman` (ASCII digit output) • `--convert file` (rewrite a roman-typed file into Devanagari).
+**Useful flags:** `--veg` (native engine) • `--roman` (ASCII digit output) •
+`--convert file` (rewrite a roman-typed file into Devanagari) • `--druta`
+(experimental compiled mode) • `--version`.
 
-**Verify your install:** `python3 परीक्षा.py` should end with `सर्वं शुद्धम् ✓`.
+**Verify your install:**
+
+```bash
+python3 परीक्षा.py          # conformance — should end with सर्वं शुद्धम् ✓
+python3 तुल्यता.py          # both engines, byte-identical output required
+cd rust-engine && cargo test  # वेगः unit tests
+```
 
 **New to संस्कृता?** Start with `docs/TUTORIAL.md` — your first 10 programs in an hour. Read `docs/AI-SPEC.md` — or paste it into any AI assistant and it becomes your संस्कृता tutor. Design patterns guide: `docs/अभिकल्पनप्रतिमानानि.md`. License: MIT. Contributions: see `CONTRIBUTING.md`.
 
@@ -63,10 +88,11 @@ python playground.py
 - **आनय Python-bridge** — `आनय "python:math" इति गणितम्।` — 5 lakh libraries
 - New builtins: योजय (append), अपनय (remove), कुञ्जिकाः (keys), क्रमय (sort)
 
-## Two engines, one language
+## Three ways to run the same program
 
 ```bash
-sanskrita प्रोग्राम.सं           # interpreter — full language, instant, REPL & playground
+sanskrita प्रोग्राम.सं            # reference engine — the specification, REPL & playground
+sanskrita --veg प्रोग्राम.सं      # वेगः — native Rust engine, single binary, no runtime
 sanskrita --druta प्रोग्राम.सं    # EXPERIMENTAL compiled mode — 1000×+ faster
 ```
 
@@ -75,6 +101,55 @@ sanskrita --druta प्रोग्राम.सं    # EXPERIMENTAL compiled 
 enough to *prove* the compiled path (§7b यन्त्रसङ्कलकः); anything outside the
 subset runs in the interpreter. Same parser, same language, verified identical
 output. Honest benchmarks: `python3 मापनम्.py` → BENCHMARKS.md.
+
+## New in v0.4 — Phase 3 complete
+
+**The engine**
+
+- **वेगः, the native Rust engine** — the whole language in a dependency-free
+  binary: hand-rolled arbitrary-precision integers, exact decimals, NFC
+  normalization, and a stack-measuring recursion guard. `sanskrita --veg prog.सं`,
+  or a REPL with no arguments. Every program is differential-tested against the
+  reference engine; the divergence ledger is public and currently empty.
+
+**The language — the last four §2b promises, delivered**
+
+- **शून्यम्-safety (the billion-dollar mistake, refused).** A typed variable
+  cannot hold शून्यम् unless you opt in:
+  `मानय नाम? : वाक्यम् = शून्यम्।`
+- **प्राक्परीक्षा — checked *before* the program runs.** Annotation violations
+  and provable text/number mixing are reported together, and nothing executes.
+  It is conservative on purpose: it reports only what it can prove.
+- **Default arguments that cannot bite you.** `विधि नम(क, ख = ५) { … }` stores
+  the *expression*, re-evaluated fresh on every call — Python's classic
+  mutable-default bug simply cannot happen here.
+- **द्रुतदशमांशः — speed, opt-in and honest.** Exact दशमांशः stays the default;
+  ask for `द्रुतदशमांशः(x)` and you get an IEEE-754 binary float that prints
+  exactly what it holds, `०.३०००००००००००००००४` and all. See
+  `examples/शुद्धिवेगौ.सं`.
+- **क्षिप** — raise your own error, catchable by प्रयत/दोषे.
+- **Method chaining (§7d sandhi-style composition).**
+  `अङ्काः.छानय(f).प्रतिचित्रय(g).योगः()` — `.नाम` on a सूची/वाक्यम्/कोशः is the
+  same stdlib function with the receiver first. See `examples/शृङ्खला.सं`.
+
+**The standard library — §6 complete**
+
+- **सूचीकर्म** — छानय (filter), प्रतिचित्रय (map), न्यूनीकरण (reduce), विपर्यय,
+  अन्तर्भवति, अनुक्रमः, योगः, महत्तमम्, लघुत्तमम्, अद्वितीयम्
+- **सञ्चिका** — पठ, लिख, योजय, अस्ति, निष्कासय, पङ्क्तयः, सूचिका (UTF-8, always)
+- **जेसन** — विश्लेषय / पाठय, and a decimal survives the round trip *exactly*,
+  because it never becomes a float
+- **वाक्यकर्म** grows — उच्च, निम्न, परिष्कार, आरभते, अन्तयति, अन्तर्भवति
+- **कालः** grows — क्षणविरामः
+- **आदेशचराः()** — command-line arguments given to your program
+
+**Testing in संस्कृता itself** — `examples/परीक्षणम्.सं` is a test framework
+written in the language, needing nothing outside the core; `examples/स्वपरीक्षा.सं`
+uses it.
+
+**Docs** — [STATUS.md](STATUS.md) (promise-by-promise audit),
+[docs/README.hi.md](docs/README.hi.md) (Hindi),
+[docs/शब्दकोशः.md](docs/शब्दकोशः.md) (technical glossary).
 
 ## New in v0.3 (फलम्)
 
@@ -95,6 +170,19 @@ output. Honest benchmarks: `python3 मापनम्.py` → BENCHMARKS.md.
 - `सं.मात्राः(text)` — laghu/guru (ल/ग) weights; `सं.छन्दः(verse)` — meter detection (गायत्री, अनुष्टुभ्, त्रिष्टुभ्, जगती)
 - `सं.रोमनय(text)` — Devanagari → IAST; `सं.देवनागरय(text)` — IAST → Devanagari
 - `सं.संधय(a, b)` — vowel sandhi joining (dīrgha, guṇa, vṛddhi, yaṇ, avagraha)
+
+## Standard library at a glance
+
+```
+आनय "गणितम्"     इति ग।    # वर्गमूलम्, घातः, ज्या, कोज्या, तलम्, पाई, ई …
+आनय "वाक्यकर्म"  इति व।    # विभज, संयोजय, खोज, प्रतिस्थापय, अंश, उच्च, परिष्कार …
+आनय "सूचीकर्म"   इति सू।   # छानय, प्रतिचित्रय, न्यूनीकरण, योगः, महत्तमम्, अद्वितीयम् …
+आनय "सञ्चिका"    इति स।    # पठ, लिख, योजय, अस्ति, निष्कासय, पङ्क्तयः, सूचिका
+आनय "जेसन"       इति ज।    # विश्लेषय, पाठय
+आनय "कालः"       इति का।   # अद्य, संप्रति, वर्षः, क्षणविरामः
+आनय "यादृच्छिकम्" इति य।    # अन्तरे, वरय, भिन्नम्
+आनय "संस्कृतम्"   इति सं।   # अक्षराणि, मात्राः, छन्दः, रोमनय, देवनागरय, संधय
+```
 
 Reserved-word note: `न`, `फलम्`, `इति` etc. are keywords — don't use them as variable names (the engine will tell you if you do).
 

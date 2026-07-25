@@ -50,6 +50,10 @@ pub struct Interp {
     pub source_dir: Option<std::path::PathBuf>,
     /// Import cache: a file runs once, however many times it is imported.
     modules: HashMap<String, Value>,
+    /// Arguments given after the program path — returned by आदेशचराः().
+    pub program_args: Vec<String>,
+    /// REPL mode: echo the value of a bare expression statement.
+    pub echo: bool,
 }
 
 type RResult<T> = Result<T, String>;
@@ -63,6 +67,59 @@ pub fn dev_digits(ascii: &str) -> String {
     ascii.chars()
         .map(|c| if c.is_ascii_digit() { d[(c as u8 - b'0') as usize] } else { c })
         .collect()
+}
+
+/// Render an f64 the way the reference engine's `repr(float)` does: the
+/// shortest text that round-trips, and always with a visible decimal point.
+pub fn fmt_f64(x: f64) -> String {
+    if x.is_nan() {
+        return "nan".into();
+    }
+    if x.is_infinite() {
+        return if x > 0.0 { "inf".into() } else { "-inf".into() };
+    }
+    // shortest representation that parses back to the same bits
+    let mut s = String::new();
+    for p in 1..=17 {
+        s = format!("{:.*e}", p - 1, x);
+        if s.parse::<f64>() == Ok(x) {
+            break;
+        }
+    }
+    let (mant, exp) = s.split_once('e').unwrap_or((s.as_str(), "0"));
+    let exp: i32 = exp.parse().unwrap_or(0);
+    // The reference (Python repr) switches to E-notation when the exponent
+    // leaves -4 ..= 15 — e.g. 1e-05 and 1e+16, but 0.0001 stays plain.
+    if !(-4..16).contains(&exp) {
+        let m = if mant.contains('.') {
+            mant.trim_end_matches('0').trim_end_matches('.').to_string()
+        } else {
+            mant.to_string()
+        };
+        return format!("{}e{}{:02}", m, if exp < 0 { "-" } else { "+" }, exp.abs());
+    }
+    let neg = mant.starts_with('-');
+    let digits: String = mant.chars().filter(|c| c.is_ascii_digit()).collect();
+    let point = exp + 1;                       // digits before the decimal point
+    let mut out = String::new();
+    if point <= 0 {
+        out.push_str("0.");
+        for _ in 0..(-point) { out.push('0'); }
+        out.push_str(&digits);
+    } else if (point as usize) >= digits.len() {
+        out.push_str(&digits);
+        for _ in 0..(point as usize - digits.len()) { out.push('0'); }
+        out.push_str(".0");
+    } else {
+        out.push_str(&digits[..point as usize]);
+        out.push('.');
+        out.push_str(&digits[point as usize..]);
+    }
+    if out.contains('.') {
+        let t = out.trim_end_matches('0');
+        out = if t.ends_with('.') { format!("{}0", t) } else { t.to_string() };
+    }
+    if neg { format!("-{}", out) } else { out }
 }
 
 fn err2(line: usize, sa: &str, en: &str) -> String {
@@ -82,6 +139,8 @@ impl Interp {
             stack_budget: DEFAULT_STACK_BUDGET,
             source_dir: None,
             modules: HashMap::new(),
+            program_args: Vec::new(),
+            echo: false,
         }
     }
 
@@ -134,6 +193,40 @@ impl Interp {
         }
     }
 
+    // §2b — the "billion-dollar mistake" fix. A typed variable cannot hold
+    // शून्यम् unless it was declared nullable with '?'.
+    fn check_type(&self, name: &str, typename: &str, v: &Value,
+                  nullable: bool, line: usize) -> RResult<()> {
+        if matches!(v, Value::Nil) {
+            if nullable {
+                return Ok(());
+            }
+            return Err(err2(line,
+                &format!("'{}' शून्यं न स्वीकरोति — घोषणे '?' प्रयुज्यताम् \
+                          (मानय {}? : {} = शून्यम्।)", name, name, typename),
+                &format!("'{}' cannot hold शून्यम् — declare it nullable with '?' \
+                          (मानय {}? : {} = शून्यम्।)", name, name, typename)));
+        }
+        let ok = match typename {
+            "पूर्णाङ्कः"   => matches!(v, Value::Int(_)),
+            "दशमांशः"     => matches!(v, Value::Int(_) | Value::Dec(_)),
+            "द्रुतदशमांशः" => matches!(v, Value::Flt(_)),
+            "वाक्यम्"      => matches!(v, Value::Str(_)),
+            "सत्यासत्यम्" => matches!(v, Value::Bool(_)),
+            "सूची"        => matches!(v, Value::List(_)),
+            "कोशः"        => matches!(v, Value::Map(_)),
+            _ => true,   // unknown type names are not enforced (yet)
+        };
+        if !ok {
+            return Err(err2(line,
+                &format!("प्रकारदोषः — '{}' {} इति घोषितम्, {} प्राप्तम्",
+                         name, typename, v.type_name()),
+                &format!("type error — '{}' is declared {}, got {}",
+                         name, typename, v.type_name())));
+        }
+        Ok(())
+    }
+
     fn exec_block(&mut self, stmts: &[Stmt]) -> RResult<Flow> {
         for st in stmts {
             match self.exec(st)? {
@@ -146,13 +239,16 @@ impl Interp {
 
     fn exec(&mut self, st: &Stmt) -> RResult<Flow> {
         match st {
-            Stmt::Let { name, expr, is_const, line } => {
+            Stmt::Let { name, expr, is_const, ty, nullable, line } => {
                 if self.scopes[self.current].consts.contains(name) {
                     return Err(err2(*line,
                         &format!("'{}' ध्रुवः — परिवर्तनं न शक्यम्", name),
                         &format!("'{}' is a constant", name)));
                 }
                 let v = self.eval(expr)?;
+                if let Some(t) = ty {
+                    self.check_type(name, t, &v, *nullable, *line)?;
+                }
                 let cur = self.current;
                 self.scopes[cur].vars.insert(name.clone(), v);
                 if *is_const {
@@ -210,7 +306,12 @@ impl Interp {
                 Ok(Flow::Normal)
             }
             Stmt::ExprStmt(e) => {
-                self.eval(e)?;
+                let v = self.eval(e)?;
+                // REPL convenience, mirroring the reference: a bare expression
+                // shows its value, but शून्यम् (e.g. from वद) stays quiet.
+                if self.echo && !matches!(v, Value::Nil) {
+                    println!("{}", self.display(&v));
+                }
                 Ok(Flow::Normal)
             }
             Stmt::Break(_) => Ok(Flow::Break),
@@ -261,13 +362,17 @@ impl Interp {
             }
             Stmt::Import { module, alias, line } => {
                 const NATIVE: &[&str] = &["संस्कृतम्", "गणितम्", "यादृच्छिकम्",
-                                          "कालः", "वाक्यकर्म"];
+                                          "कालः", "वाक्यकर्म", "सूचीकर्म",
+                                          "सञ्चिका", "जेसन"];
                 let canon = match module.as_str() {
                     "sanskritam" => "संस्कृतम्",
                     "ganitam" => "गणितम्",
                     "yadrcchikam" => "यादृच्छिकम्",
                     "kalah" => "कालः",
                     "vakyakarma" => "वाक्यकर्म",
+                    "suchikarma" => "सूचीकर्म",
+                    "sanchika" => "सञ्चिका",
+                    "json" => "जेसन",
                     other => other,
                 };
                 if let Some(found) = NATIVE.iter().find(|m| **m == canon) {
@@ -287,6 +392,16 @@ impl Interp {
                 Err(err2(*line,
                     &format!("'{}' इति कोष्ठकं न ज्ञातम्", canon),
                     &format!("unknown module '{}'", canon)))
+            }
+            Stmt::Throw { expr, line } => {
+                // `क्षिप "सन्देशः"।` — same message on both sides, matching the
+                // reference (SanskritaError(line, text, text)).
+                let v = self.eval(expr)?;
+                let text = match &v {
+                    Value::Str(s) => s.clone(),
+                    other => self.display(other),
+                };
+                Err(err2(*line, &text, &text))
             }
             Stmt::Try { body, err_name, catch, line: _ } => {
                 match self.exec_block(body) {
@@ -529,9 +644,21 @@ impl Interp {
                                 &format!("module '{}' has no '{}'", mname, name))),
                         }
                     }
-                    _ => Err(err2(*line,
-                        &format!("{} '.{}' न जानाति", o.type_name(), name),
-                        &format!("this value has no attribute '.{}'", name))),
+                    // §7d #2 — built-in types answer to methods too
+                    _ => match crate::stdlib::method_for(o.type_name(), name) {
+                        Some((m, n)) => Ok(Value::BoundNative(Box::new(o.clone()), m, n)),
+                        None => {
+                            let known = crate::stdlib::methods_of(o.type_name());
+                            let hint = if known.is_empty() { String::new() }
+                                       else { format!(" — विधयः: {}", known.join(", ")) };
+                            let hint_en = if known.is_empty() { String::new() }
+                                          else { format!(" — methods: {}", known.join(", ")) };
+                            Err(err2(*line,
+                                &format!("{} '.{}' न जानाति{}", o.type_name(), name, hint),
+                                &format!("{} has no method '.{}'{}",
+                                         o.type_name(), name, hint_en)))
+                        }
+                    },
                 }
             }
             Expr::New(inner, line) => {
@@ -610,6 +737,12 @@ impl Interp {
                             _ => unreachable!(),
                         }
                     }
+                    "+" | "-" | "*" | "%" | "/"
+                        if matches!(lv, Value::Flt(_)) || matches!(rv, Value::Flt(_)) => {
+                        // द्रुतदशमांशः is contagious: once you opt into binary
+                        // floats, the result is a binary float.
+                        self.flt_arith(op, &lv, &rv, *line)
+                    }
                     "+" | "-" | "*" | "%" | "/" => {
                         if !lv.is_number() || !rv.is_number() {
                             let mixed = matches!(&lv, Value::Str(_)) || matches!(&rv, Value::Str(_));
@@ -682,6 +815,24 @@ impl Interp {
                 }
                 crate::stdlib::call(self, module, name, vals, line)
             }
+            Value::BoundNative(recv, module, name) => {
+                // the receiver becomes the first argument: सूची.छानय(f) IS
+                // सू.छानय(सूची, f) — same code, same result
+                let (module, name) = (*module, *name);
+                let mut vals = vec![(**recv).clone()];
+                for a in args {
+                    if a.karaka.is_some() {
+                        return Err(err2(line,
+                            "अन्तर्निहितविधयः कारकं न गृह्णन्ति",
+                            "built-in methods do not take kāraka labels"));
+                    }
+                    vals.push(self.eval(&a.value)?);
+                }
+                match module {
+                    Some(m) => crate::stdlib::call(self, m, name, vals, line),
+                    None => self.call_builtin(name, vals, line),
+                }
+            }
             Value::Func(func) => self.call_function(func, args, line, None),
             Value::Bound(inst, func) => self.call_function(func, args, line, Some(inst.clone())),
             Value::Class(class) => self.instantiate(class, args, line),
@@ -691,12 +842,36 @@ impl Interp {
         }
     }
 
+    /// Call any callable with values that are already evaluated. Native
+    /// higher-order stdlib functions (सूचीकर्म.छानय, .प्रतिचित्रय, .न्यूनीकरण)
+    /// use this to invoke संस्कृता callbacks — the Rust twin of the reference
+    /// engine's `_to_py_arg` bridge.
+    pub fn apply(&mut self, f: &Value, vals: Vec<Value>, line: usize) -> RResult<Value> {
+        match f {
+            Value::Func(func) => self.call_function_vals(func, vals, Vec::new(), line, None),
+            Value::Bound(inst, func) =>
+                self.call_function_vals(func, vals, Vec::new(), line, Some(inst.clone())),
+            Value::Native(module, name) => {
+                let (m, n) = (*module, *name);
+                crate::stdlib::call(self, m, n, vals, line)
+            }
+            Value::BoundNative(recv, module, name) => {
+                let (m, n) = (*module, *name);
+                let mut all = vec![(**recv).clone()];
+                all.extend(vals);
+                match m {
+                    Some(m) => crate::stdlib::call(self, m, n, all, line),
+                    None => self.call_builtin(n, all, line),
+                }
+            }
+            other => Err(err2(line,
+                &format!("{} आह्वातुं न शक्यम्", other.type_name()),
+                "this value is not callable")),
+        }
+    }
+
     fn call_function(&mut self, f: &Rc<Function>, args: &[Arg], line: usize,
                      self_obj: Option<Rc<Instance>>) -> RResult<Value> {
-        if self.stack_used() > self.stack_budget || self.depth >= self.max_depth {
-            return Err(err2(line, "अतिगभीरा पुनरावृत्तिः (स्मृति-सीमा)",
-                            "recursion too deep (stack limit)"));
-        }
         let mut positional: Vec<Value> = Vec::new();
         let mut labeled: Vec<(String, Value)> = Vec::new();
         for a in args {
@@ -706,11 +881,25 @@ impl Interp {
                 None => positional.push(v),
             }
         }
+        self.call_function_vals(f, positional, labeled, line, self_obj)
+    }
+
+    fn call_function_vals(&mut self, f: &Rc<Function>, positional: Vec<Value>,
+                          mut labeled: Vec<(String, Value)>, line: usize,
+                          self_obj: Option<Rc<Instance>>) -> RResult<Value> {
+        if self.stack_used() > self.stack_budget || self.depth >= self.max_depth {
+            return Err(err2(line, "अतिगभीरा पुनरावृत्तिः (स्मृति-सीमा)",
+                            "recursion too deep (stack limit)"));
+        }
         let mut local = Scope::new(Some(0));
         if let Some(obj) = &self_obj {
             local.vars.insert("अयम्".into(), Value::Object(obj.clone()));
         }
         let mut pos_iter = positional.into_iter();
+        // Parameters left to a default value are filled in AFTER the scope is
+        // pushed, so the default expression is evaluated in the function's own
+        // scope — freshly, on every call.
+        let mut defaults: Vec<(String, Expr)> = Vec::new();
         for p in &f.params {
             let bound = if let Some(k) = &p.karaka {
                 if let Some(idx) = labeled.iter().position(|(lk, _)| lk == k) {
@@ -723,13 +912,18 @@ impl Interp {
             };
             match bound {
                 Some(v) => { local.vars.insert(p.name.clone(), v); }
-                None => {
-                    let role = p.karaka.as_deref().map(|k| format!(" ({})", k))
-                        .unwrap_or_default();
-                    return Err(err2(line,
-                        &format!("'{}' विधौ '{}'{} इत्यस्य मूल्यं न दत्तम्", f.name, p.name, role),
-                        &format!("function '{}' missing argument '{}'{}", f.name, p.name, role)));
-                }
+                None => match &p.default {
+                    Some(d) => defaults.push((p.name.clone(), d.clone())),
+                    None => {
+                        let role = p.karaka.as_deref().map(|k| format!(" ({})", k))
+                            .unwrap_or_default();
+                        return Err(err2(line,
+                            &format!("'{}' विधौ '{}'{} इत्यस्य मूल्यं न दत्तम्",
+                                     f.name, p.name, role),
+                            &format!("function '{}' missing argument '{}'{}",
+                                     f.name, p.name, role)));
+                    }
+                },
             }
         }
         if let Some((k, _)) = labeled.first() {
@@ -749,7 +943,19 @@ impl Interp {
         let saved = self.current;
         self.current = self.scopes.len() - 1;
         self.depth += 1;
-        let result = self.exec_block(&f.body);
+        let mut result = Ok(Flow::Normal);
+        for (name, d) in &defaults {
+            match self.eval(d) {
+                Ok(v) => {
+                    let cur = self.current;
+                    self.scopes[cur].vars.insert(name.clone(), v);
+                }
+                Err(e) => { result = Err(e); break; }
+            }
+        }
+        if result.is_ok() {
+            result = self.exec_block(&f.body);
+        }
         self.depth -= 1;
         self.current = saved;
         self.scopes.pop();
@@ -760,6 +966,46 @@ impl Interp {
             _ => Err(err2(line, "'विरम'/'अनुवर्त' चक्रात् बहिः न शक्यम्",
                           "break/continue outside a loop")),
         }
+    }
+
+    /// `+` on two already-evaluated values — used by सूचीकर्म.योगः.
+    pub fn add_values(&self, a: &Value, b: &Value, line: usize) -> RResult<Value> {
+        match (a, b) {
+            (Value::Str(x), Value::Str(y)) => Ok(Value::Str(format!("{}{}", x, y))),
+            (Value::List(x), Value::List(y)) => {
+                let mut out = x.borrow().clone();
+                out.extend(y.borrow().iter().cloned());
+                Ok(Value::list(out))
+            }
+            _ if a.is_number() && b.is_number() => self.num_arith("+", a, b, line),
+            _ => Err(err2(line, "सङ्ख्ये अपेक्षिते", "expected numbers")),
+        }
+    }
+
+    /// `a > b` on two already-evaluated values — used by महत्तमम्/लघुत्तमम्.
+    pub fn greater_than(&self, a: &Value, b: &Value, line: usize) -> RResult<bool> {
+        match self.compare(">", a, b, line)? {
+            Value::Bool(t) => Ok(t),
+            _ => Ok(false),
+        }
+    }
+
+    /// द्रुतदशमांशः arithmetic — plain IEEE-754, no rounding tricks.
+    fn flt_arith(&self, op: &str, lv: &Value, rv: &Value, line: usize) -> RResult<Value> {
+        let bad = || err2(line, "सङ्ख्ये अपेक्षिते", "expected numbers");
+        let a = lv.as_f64().ok_or_else(bad)?;
+        let b = rv.as_f64().ok_or_else(bad)?;
+        if (op == "/" || op == "%") && b == 0.0 {
+            return Err(err2(line, "शून्येन भागो न शक्यः", "division by zero"));
+        }
+        Ok(Value::Flt(match op {
+            "+" => a + b,
+            "-" => a - b,
+            "*" => a * b,
+            "/" => a / b,
+            "%" => a - (a / b).floor() * b,
+            _ => return Err("आन्तरिकदोषः / internal error".into()),
+        }))
     }
 
     /// Exact numeric arithmetic (see slice 5).
@@ -814,7 +1060,13 @@ impl Interp {
     }
 
     fn compare(&self, op: &str, a: &Value, b: &Value, line: usize) -> RResult<Value> {
-        let ord = if a.is_number() && b.is_number() {
+        let ord = if matches!(a, Value::Flt(_)) || matches!(b, Value::Flt(_)) {
+            match (a.as_f64(), b.as_f64()) {
+                (Some(x), Some(y)) => x.partial_cmp(&y),
+                _ => return Err(err2(line, "तुलना समानप्रकारयोः एव",
+                                     "can only compare two numbers or two texts")),
+            }
+        } else if a.is_number() && b.is_number() {
             match (a.as_decimal(), b.as_decimal()) {
                 (Some(x), Some(y)) => Some(x.cmp_to(&y)),
                 _ => None,
@@ -844,6 +1096,10 @@ impl Interp {
         match v {
             Value::Int(n) => dev_digits(&n.to_string_signed()),
             Value::Dec(d) => dev_digits(&d.to_plain_string()),
+            // द्रुतदशमांशः prints exactly what IEEE-754 holds — including the
+            // famous ०.३०००००००००००००००४. Nothing is hidden; that honesty is
+            // the point of making the fast type opt-in.
+            Value::Flt(f) => dev_digits(&fmt_f64(*f)),
             Value::Str(s) => if inner { format!("\"{}\"", s) } else { s.clone() },
             Value::Bool(b) => if *b { "सत्यम्".into() } else { "असत्यम्".into() },
             Value::Nil => "शून्यम्".into(),
@@ -870,6 +1126,7 @@ impl Interp {
             Value::Module(m) => format!("<कोष्ठकम् {}>", m),
             Value::UserModule(_, name) => format!("<कोष्ठकम् {}>", name),
             Value::Native(m, f) => format!("<विधिः {}.{}>", m, f),
+            Value::BoundNative(recv, _, f) => format!("<विधिः {}.{}>", recv.type_name(), f),
         }
     }
 
@@ -902,7 +1159,11 @@ impl Interp {
                     return Err(err2(line, "प्रकारः() एकम् एव गृह्णाति",
                                     "प्रकारः() takes exactly one value"));
                 }
-                Ok(Value::Str(vals[0].type_name().into()))
+                // an object reports its own वर्गः name, matching the reference
+                Ok(Value::Str(match &vals[0] {
+                    Value::Object(o) => o.class.name.clone(),
+                    other => other.type_name().to_string(),
+                }))
             }
             "सङ्ख्या" => match vals.first() {
                 Some(Value::Str(s)) if vals.len() == 1 => {
@@ -1016,6 +1277,37 @@ impl Interp {
                 _ => Err(err2(line, "परिधिः(आदिः, अन्तः) — द्वौ पूर्णाङ्कौ अपेक्षितौ",
                               "परिधिः(start, end) needs two whole numbers")),
             },
+            "द्रुतदशमांशः" => {
+                // §2b — the opt-in fast path. Binary floats are what every
+                // other language gives you by default; here you must ask.
+                let bad = || err2(line, "द्रुतदशमांशः() एकां सङ्ख्यां गृह्णाति",
+                                  "द्रुतदशमांशः() takes one number");
+                if vals.len() != 1 {
+                    return Err(bad());
+                }
+                match &vals[0] {
+                    Value::Flt(f) => Ok(Value::Flt(*f)),
+                    v if v.is_number() => v.as_f64().map(Value::Flt).ok_or_else(bad),
+                    Value::Str(s) => {
+                        let ascii: String = s.trim().chars().map(|c| match c {
+                            '०'..='९' => char::from(b'0' + (c as u32 - '०' as u32) as u8),
+                            other => other,
+                        }).collect();
+                        ascii.parse::<f64>().map(Value::Flt).map_err(|_| err2(line,
+                            &format!("'{}' सङ्ख्या न", s),
+                            &format!("'{}' is not a number", s)))
+                    }
+                    _ => Err(bad()),
+                }
+            }
+            "आदेशचराः" => {
+                if !vals.is_empty() {
+                    return Err(err2(line, "आदेशचराः() मूल्यानि न गृह्णाति",
+                                    "आदेशचराः() takes no arguments"));
+                }
+                Ok(Value::list(self.program_args.iter().cloned()
+                    .map(Value::Str).collect()))
+            }
             "पृच्छ" => {
                 let prompt = vals.first().map(|v| self.display(v)).unwrap_or_default();
                 use std::io::Write;
@@ -1412,5 +1704,217 @@ mod tests {
             .unwrap();
         let n: Result<String, String> = handle.join().expect("thread must not crash");
         assert_eq!(n.unwrap(), "200");
+    }
+
+    // ---- Phase-3 completion: क्षिप, शून्यम्-safety, सूचीकर्म, जेसन, सञ्चिका ----
+
+    #[test]
+    fn type_of_an_object_is_its_class_name() {
+        assert_eq!(shown("वर्गः घटः { } मानय व = सृज घटः()। मानय प = प्रकारः(व)।"),
+                   "घटः");
+    }
+
+    #[test]
+    fn throw_raises_a_catchable_error() {
+        assert_eq!(
+            shown("मानय प = \"—\"। प्रयत { क्षिप \"मम दोषः\"। } दोषे (त्रु) { प = त्रु। }"),
+            "मम दोषः");
+    }
+
+    #[test]
+    fn throw_uncaught_is_an_error() {
+        assert!(run_ok("क्षिप \"विफलम्\"।").is_err());
+    }
+
+    #[test]
+    fn nullable_declaration_accepts_nil() {
+        assert_eq!(shown("मानय प? : वाक्यम् = शून्यम्।"), "शून्यम्");
+    }
+
+    #[test]
+    fn typed_declaration_rejects_nil() {
+        // §2b — the billion-dollar mistake, refused at the declaration.
+        assert!(run_ok("मानय क : वाक्यम् = शून्यम्।").is_err());
+    }
+
+    #[test]
+    fn typed_declaration_rejects_wrong_type() {
+        assert!(run_ok("मानय क : पूर्णाङ्कः = \"पञ्च\"।").is_err());
+        assert!(run_ok("मानय क : पूर्णाङ्कः = ५।").is_ok());
+    }
+
+    #[test]
+    fn suchikarma_higher_order() {
+        assert_eq!(
+            shown("आनय \"सूचीकर्म\" इति सू। \
+                   मानय प = सू.छानय([१, २, ३, ४], विधि(क) { फलम् क > २। })।"),
+            "[३, ४]");
+        assert_eq!(
+            shown("आनय \"सूचीकर्म\" इति सू। \
+                   मानय प = सू.प्रतिचित्रय([१, २, ३], विधि(क) { फलम् क * क। })।"),
+            "[१, ४, ९]");
+        assert_eq!(
+            shown("आनय \"सूचीकर्म\" इति सू। \
+                   मानय प = सू.न्यूनीकरण([१, २, ३, ४], विधि(अ, ब) { फलम् अ + ब। }, ०)।"),
+            "१०");
+    }
+
+    #[test]
+    fn suchikarma_aggregates() {
+        assert_eq!(shown("आनय \"सूचीकर्म\" इति सू। मानय प = सू.योगः([१, २, ३])।"), "६");
+        assert_eq!(shown("आनय \"सूचीकर्म\" इति सू। मानय प = सू.महत्तमम्([३, ९, १])।"), "९");
+        assert_eq!(shown("आनय \"सूचीकर्म\" इति सू। मानय प = सू.लघुत्तमम्([३, ९, १])।"), "१");
+        assert_eq!(shown("आनय \"सूचीकर्म\" इति सू। मानय प = सू.विपर्यय([१, २, ३])।"), "[३, २, १]");
+        assert_eq!(shown("आनय \"सूचीकर्म\" इति सू। मानय प = सू.अनुक्रमः([\"अ\", \"ब\"], \"ब\")।"),
+                   "२");
+        assert_eq!(shown("आनय \"सूचीकर्म\" इति सू। मानय प = सू.अद्वितीयम्([१, २, १, ३, २])।"),
+                   "[१, २, ३]");
+    }
+
+    #[test]
+    fn vakyakarma_additions() {
+        assert_eq!(shown("आनय \"वाक्यकर्म\" इति व। मानय प = व.परिष्कार(\"  क  \")।"), "क");
+        assert_eq!(shown("आनय \"वाक्यकर्म\" इति व। मानय प = व.आरभते(\"नमस्ते\", \"नम\")।"),
+                   "सत्यम्");
+        assert_eq!(shown("आनय \"वाक्यकर्म\" इति व। मानय प = व.अन्तर्भवति(\"नमस्ते\", \"स्ते\")।"),
+                   "सत्यम्");
+    }
+
+    // JSON must survive a round trip without a digit changing — that is the
+    // whole point of parsing decimals exactly instead of through a float.
+    #[test]
+    fn json_round_trip_is_exact() {
+        assert_eq!(
+            shown("आनय \"जेसन\" इति ज। \
+                   मानय क = ज.विश्लेषय(\"{\\\"मूल्यम्\\\": 0.1, \\\"सङ्ख्या\\\": 7}\")। \
+                   मानय प = क[\"मूल्यम्\"] + ०.२।"),
+            "०.३");
+        assert_eq!(
+            shown("आनय \"जेसन\" इति ज। मानय प = ज.पाठय({\"क\": १, \"ख\": [२, ३]})।"),
+            "{\"क\": 1, \"ख\": [2, 3]}");
+    }
+
+    #[test]
+    fn json_rejects_malformed_input() {
+        assert!(run_ok("आनय \"जेसन\" इति ज। मानय क = ज.विश्लेषय(\"{अ}\")।").is_err());
+    }
+
+    #[test]
+    fn sanchika_write_read_remove() {
+        let dir = std::env::temp_dir().join("sanskrita-veg-test");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("परीक्षा.txt");
+        let p = path.to_string_lossy().replace('\\', "/");
+        let src = format!(
+            "आनय \"सञ्चिका\" इति स। \
+             स.लिख(\"{}\", \"क\\nख\\n\")। \
+             स.योजय(\"{}\", \"ग\\n\")। \
+             मानय प = स.पङ्क्तयः(\"{}\")।", p, p, p);
+        assert_eq!(shown(&src), "[\"क\", \"ख\", \"ग\"]");
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn program_args_are_visible() {
+        let toks = lex("मानय प = आदेशचराः()।").unwrap();
+        let stmts = Parser::new(toks).program().unwrap();
+        let mut it = Interp::new();
+        it.program_args = vec!["अ".into(), "ब".into()];
+        it.run(&stmts).unwrap();
+        let v = it.scopes[0].vars.get("प").cloned().unwrap();
+        assert_eq!(it.display(&v), "[\"अ\", \"ब\"]");
+    }
+
+    // ---- blueprint gaps closed: defaults, method chaining, द्रुतदशमांशः ----
+
+    #[test]
+    fn default_parameters() {
+        assert_eq!(shown("विधि नम(क, ख = ५) { फलम् क + ख। } मानय प = नम(१)।"), "६");
+        assert_eq!(shown("विधि नम(क, ख = ५) { फलम् क + ख। } मानय प = नम(१, १०)।"), "११");
+    }
+
+    #[test]
+    fn default_parameters_with_karakas() {
+        assert_eq!(
+            shown("विधि अभि(कर्म नाम, करण भाषा = \"संस्कृतम्\") { फलम् नाम + भाषा। } \
+                   मानय प = अभि(कर्म: \"क\")।"),
+            "कसंस्कृतम्");
+    }
+
+    // Python's classic bug: a mutable default shared across calls. Here the
+    // default is an EXPRESSION, re-evaluated every call, so it cannot happen.
+    #[test]
+    fn default_values_are_fresh_every_call() {
+        assert_eq!(
+            shown("विधि य(म, स = []) { योजय(स, म)। फलम् स। } \
+                   य(१)। मानय प = य(२)।"),
+            "[२]");
+    }
+
+    #[test]
+    fn method_chaining_on_lists() {
+        assert_eq!(shown("मानय प = [३, १, २].क्रमय()।"), "[१, २, ३]");
+        assert_eq!(shown("मानय प = [३, १, २].क्रमय().विपर्यय()।"), "[३, २, १]");
+        assert_eq!(
+            shown("मानय प = [१, २, ३, ४].छानय(विधि(क) { फलम् क > २। }).योगः()।"),
+            "७");
+        assert_eq!(shown("मानय प = [१, २, ३].दैर्घ्यम्()।"), "३");
+    }
+
+    #[test]
+    fn method_chaining_on_text_and_maps() {
+        assert_eq!(shown("मानय प = \"  नमस्ते  \".परिष्कार()।"), "नमस्ते");
+        assert_eq!(shown("मानय प = \"अ,ब,स\".विभज(\",\").दैर्घ्यम्()।"), "३");
+        assert_eq!(shown("मानय प = {\"अ\": १, \"ब\": २}.कुञ्जिकाः()।"), "[\"अ\", \"ब\"]");
+    }
+
+    #[test]
+    fn unknown_method_is_an_error_with_a_hint() {
+        let e = run_ok("मानय स = [१]। वद(स.क्रम())।").unwrap_err();
+        assert!(e.contains("न जानाति"), "{}", e);
+        assert!(e.contains("क्रमय"), "{}", e);
+    }
+
+    // द्रुतदशमांशः: exact by default, fast when you ask — and honest either way.
+    #[test]
+    fn fast_float_is_opt_in_and_honest() {
+        assert_eq!(shown("मानय प = ०.१ + ०.२।"), "०.३");
+        assert_eq!(shown("मानय प = प्रकारः(०.१ + ०.२)।"), "दशमांशः");
+        assert_eq!(
+            shown("मानय प = द्रुतदशमांशः(०.१) + द्रुतदशमांशः(०.२)।"),
+            "०.३०००००००००००००००४");
+        assert_eq!(
+            shown("मानय प = प्रकारः(द्रुतदशमांशः(०.१) + द्रुतदशमांशः(०.२))।"),
+            "द्रुतदशमांशः");
+    }
+
+    #[test]
+    fn fast_float_is_contagious_and_comparable() {
+        assert_eq!(shown("मानय प = द्रुतदशमांशः(१) + ०.५।"), "१.५");
+        assert_eq!(shown("मानय प = प्रकारः(द्रुतदशमांशः(१) + ०.५)।"), "द्रुतदशमांशः");
+        assert_eq!(shown("मानय प = द्रुतदशमांशः(२) > १।"), "सत्यम्");
+        assert_eq!(shown("मानय प = द्रुतदशमांशः(२) / ४।"), "०.५");
+    }
+
+    #[test]
+    fn fast_float_annotation() {
+        assert!(run_ok("मानय क : द्रुतदशमांशः = द्रुतदशमांशः(१)।").is_ok());
+        assert!(run_ok("मानय क : द्रुतदशमांशः = १।").is_err());
+    }
+
+    #[test]
+    fn unknown_type_name_is_rejected() {
+        assert!(run_ok("मानय क : सङ्ख्या = ५।").is_err());
+    }
+
+    #[test]
+    fn float_formatting_matches_the_reference() {
+        assert_eq!(fmt_f64(0.1), "0.1");
+        assert_eq!(fmt_f64(0.1 + 0.2), "0.30000000000000004");
+        assert_eq!(fmt_f64(2.0), "2.0");
+        assert_eq!(fmt_f64(-0.5), "-0.5");
+        assert_eq!(fmt_f64(2.0 / 3.0), "0.6666666666666666");
+        assert_eq!(fmt_f64(1e17), "1e+17");
+        assert_eq!(fmt_f64(1e-7), "1e-07");
     }
 }

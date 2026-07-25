@@ -1,63 +1,105 @@
 # वेगः — the संस्कृता native Rust engine
 
-The Phase 3c rewrite: a compiled, standalone engine for संस्कृता that needs no
-Python. The Python interpreter (`../sanskrita.py`) stays as the **reference
-implementation**; this engine is correct when it produces identical results and
-passes the conformance suite (`../परीक्षा.py`, 51 cases).
+A compiled, standalone engine for संस्कृता that needs no Python at all.
 
-## Status: **slices 1–5 — exact numbers, functions, recursion** (incremental)
+`../sanskrita.py` remains the **reference implementation** — it defines the
+language. वेगः is correct when it produces *byte-identical* output for every
+program in `../तुल्यता.py` and passes `../परीक्षा.py`.
 
-Built incrementally so every step is compilable and testable:
+## Status: **complete language** (Phase 3, v0.4.0)
+
+Built in slices so every step stayed compilable and testable:
 
 - [x] **Slice 1 — lexer**: tokens, Devanagari + ASCII digits, danda, strings,
-  comments, roman aliases, keyword/identifier split, mixed-script guard.
-- [x] **Slice 2 — parser**: full AST + recursive-descent for the core subset.
-- [x] **Slice 3 — evaluator**: मानय/ध्रुव, assignment, integer arithmetic,
-  comparisons, च/वा/न, यदि/अथ/अन्यथा, यावत्, विरम/अनुवर्त, वद, वाक्यम्,
-  दैर्घ्यम्, प्रकारः, सङ्ख्या. **Runs real programs natively.**
-- [x] **Slice 4 — functions**: `विधि` definitions & calls, `फलम्` returns,
-  recursion (depth-guarded), lexical scoping, and **kāraka-labeled arguments**
-  (`प्रे(सम्प्रदान: …, कर्म: …)` — any order), with arity/role errors.
+  comments, roman aliases, keyword/identifier split, mixed-script guard, NFC.
+- [x] **Slice 2 — parser**: full AST + recursive descent.
+- [x] **Slice 3 — evaluator**: declarations, assignment, arithmetic,
+  comparisons, च/वा/न, यदि/अथ/अन्यथा, यावत्, विरम/अनुवर्त, core builtins.
+- [x] **Slice 4 — functions**: `विधि`, `फलम्`, recursion (stack-measured guard),
+  lexical scoping, and **kāraka-labelled arguments** in any order.
 - [x] **Slice 5 — exact numbers**: arbitrary-precision integers (`bigint.rs`)
-  and exact decimals (`decimal.rs`), both hand-written with **no dependencies**.
+  and exact decimals (`decimal.rs`), both hand-written, **zero dependencies**.
   `०.१ + ०.२ == ०.३`, `२५!` exact, int↔decimal promotion, floored `%`.
-  All three tracked divergences with the reference are now closed.
-- [ ] Slice 6 — lists, maps, classes, प्रयत/दोषे
-- [ ] Slice 7 — kāraka arguments, संस्कृतम् stdlib, conformance parity
+- [x] **Slice 6 — collections & objects**: सूची, कोशः, वर्गः with inheritance,
+  सृज, अयम्, प्रयत/दोषे, lambdas.
+- [x] **Slice 7 — modules & stdlib**: आनय for native modules and the user's own
+  `.सं` files; संस्कृतम्, गणितम्, वाक्यकर्म, यादृच्छिकम्, कालः.
+- [x] **Phase-3 completion**: क्षिप, शून्यम्-safety with `?`, **प्राक्परीक्षा**
+  (pre-flight check), default parameter values, method chaining on built-in
+  types, **द्रुतदशमांशः** (opt-in binary float), सूचीकर्म, सञ्चिका, जेसन,
+  आदेशचराः, and a REPL.
 
-## First measured result (MacBook, 2026-07-12)
+**Intentionally absent:** `आनय "python:…"`. The Python bridge is a bootstrap,
+not a foundation (design risk #21), so वेगः rejects it with a clear bilingual
+message naming the engine to use instead. This is the only behavioural
+difference between the two engines, and it is deliberate.
 
-Loop sum 1..50,000 — `मानय स = ०। मानय इ = १। यावत् (इ <= ५००००) {…}`
+## Files
 
-| Workload | Python engine | वेगः (Rust) |
-|---|---|---|
-| loop sum 1..50,000 | ~106 ms | **~20 ms** |
-| `examples/द्रुतोदाहरणम्.सं` — loops + recursion + primes (wall clock) | 120 ms | **8 ms** |
+| File | What it holds |
+|---|---|
+| `lexer.rs` | tokens, danda handling, roman aliases, mixed-script guard |
+| `nfc.rs` | dependency-free NFC for the Devanagari block (8 nukta exclusions) |
+| `parser.rs` | recursive-descent parser → `ast.rs` |
+| `precheck.rs` | प्राक्परीक्षा — everything provable before the program runs |
+| `interp.rs` | the evaluator: scope arena, stack-measured recursion guard, builtins |
+| `bigint.rs` | arbitrary-precision integers, base-10⁹ limbs |
+| `decimal.rs` | exact decimals, 28 significant digits on inexact division |
+| `value.rs` | the runtime `Value` enum; `Rc<RefCell<…>>` for shared collections |
+| `stdlib.rs` | native modules + the built-in method tables (§7d chaining) |
+| `sanskritam.rs` | akṣara, mātrā, chandas, sandhi, IAST ↔ Devanagari |
 
-Identical output from both engines, verified byte-for-byte.
+## Build, test, run
 
-~5× faster with zero optimization work — the first real evidence for the
-blueprint's speed promise. Correct answer (१२५००२५०००) verified against the
-Python engine. Expect further gains from slice 5+ and later optimization.
-
-## Build & test
-
-Requires Rust (install from https://rustup.rs):
+Requires Rust (https://rustup.rs):
 
 ```bash
-cargo build --release      # produces target/release/sanskrita-veg
-cargo test                 # runs the lexer unit tests
-cargo run -- ../examples/नमस्ते.सं   # slice 1: prints the token stream
+cargo build --release              # → target/release/sanskrita-veg
+cargo test                         # unit tests
+cargo run --release -- ../examples/नमस्ते.सं
+cargo run --release --             # no file → REPL
 ```
 
-## Design
+Or from the main CLI, which builds it for you on first use:
 
-Mirrors `sanskrita.py` deliberately — same token kinds, same keyword set, same
-error style (bilingual). Translating a well-tested Python reference into Rust
-one slice at a time is far safer than a clean-room rewrite, and the conformance
-suite catches any drift.
+```bash
+sanskrita --veg ../examples/नमस्ते.सं
+```
 
-Target: single binary, ~30–50× faster than the Python interpreter, no runtime
-dependency. See `../BENCHMARKS.md` for the numbers this must beat.
+## The contract
+
+```bash
+cd .. && python3 तुल्यता.py
+```
+
+Every program in that harness must produce identical output from both engines,
+and every program in its `MUST_FAIL` list must fail in both. Divergences are
+recorded in `AUDIT.md`, never hidden. **Current ledger: empty.**
+
+## Measured (MacBook, 2026-07-12, slices 1–3)
+
+| Workload | reference engine | वेगः |
+|---|---|---|
+| loop sum 1..50,000 | ~106 ms | **~20 ms** |
+| `examples/द्रुतोदाहरणम्.सं` (loops + recursion + primes) | 120 ms | **8 ms** |
+
+Identical output, verified byte-for-byte. Current numbers live in
+`../BENCHMARKS.md`; re-measure with `python3 ../मापनम्.py`.
+
+## Design notes
+
+वेगः deliberately mirrors `sanskrita.py` — same token kinds, same keyword set,
+same bilingual error shape. Translating a well-tested reference one slice at a
+time is far safer than a clean-room rewrite, and the differential harness
+catches any drift the moment it appears.
+
+Two decisions worth knowing:
+
+- **No external crates.** Bignums, decimals and NFC are hand-written, so the
+  binary has no supply chain and the memory story (§7c) stays ours to control.
+- **The recursion guard measures the stack** rather than counting frames: it
+  compares the current stack address against an anchor taken at start-up. Frame
+  size changes with build profile and language features, so counting frames was
+  wrong twice before this replaced it.
 
 जयतु संस्कृतम् ।

@@ -136,8 +136,8 @@ class CEmitter:
             out.append(f"{pad}return {self.expr(expr) if expr else '0'};")
         elif k == "func":
             _, name, params, body, _ = st
-            ps = ", ".join(f"ll {mangle(p)}" for _, p in params)
-            self.declared_stack.append({p for _, p in params})
+            ps = ", ".join(f"ll {mangle(p)}" for _, p, _ in params)
+            self.declared_stack.append({p for _, p, _ in params})
             fb = [f"ll {mangle(name)}({ps}) {{"]
             for s in body:
                 self.stmt(s, fb, 1)

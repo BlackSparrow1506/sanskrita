@@ -1,21 +1,32 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-ॐ  संस्कृता (Sanskrita) — v0.2 "वृक्षः" (Tree)
-The Sanskrit programming language — Phase 2 interpreter.
+ॐ  संस्कृता (Sanskrita) — v0.4 "फलम्" (Fruit)
+The Sanskrit programming language — the reference engine.
+
+This file IS the specification. The native वेगः engine (rust-engine/) must
+produce byte-identical output for every program; तुल्यता.py enforces that.
 
 Usage:
-    python3 sanskrita.py program.सं        run a program
+    python3 sanskrita.py program.सं        run a program (reference engine)
+    python3 sanskrita.py --veg program.सं  run it on the native वेगः engine
     python3 sanskrita.py                   interactive REPL
     python3 sanskrita.py --roman prog.सं   output digits in ASCII
     python3 sanskrita.py --convert f.sam   rewrite file in canonical Devanagari
+    python3 sanskrita.py --druta prog.सं   experimental compiled mode
+    python3 sanskrita.py --version         print the version
 
-Phase 2 adds (per BLUEPRINT.md):
-    विधि functions (first-class, closures, recursion) with फलम् return,
-    kāraka-labeled arguments (कर्म:, करण:, सम्प्रदान:…),
-    सूची lists & कोशः maps (1-based indexing — प्रथमः = १),
-    प्रत्येकम् … इति for-each, वर्गः classes with सृज and अयम्,
-    प्रयत/दोषे error handling, आनय Python-bridge.
+The language (per BLUEPRINT.md):
+    Phase 1  मानय/ध्रुव, यदि/अथ यदि/अन्यथा, यावत्, विरम/अनुवर्त, exact
+             decimals and arbitrary-precision integers, type annotations.
+    Phase 2  विधि functions (first-class, closures, recursion) with फलम्,
+             kāraka-labeled arguments (कर्म:, करण:, सम्प्रदान:…) in ANY order,
+             सूची lists & कोशः maps (1-based indexing — प्रथमः = १),
+             प्रत्येकम् … इति for-each, वर्गः classes with सृज and अयम्,
+             प्रयत/दोषे error handling, आनय imports and the Python bridge.
+    Phase 3  क्षिप raise, शून्यम्-safety (`मानय नाम? : प्रकारः = शून्यम्।`),
+             the stdlib promised in §6 — गणितम्, वाक्यकर्म, सूचीकर्म, कालः,
+             सञ्चिका, जेसन, संस्कृतम् — and the native वेगः engine.
 """
 
 import difflib
@@ -27,7 +38,10 @@ from decimal import Decimal
 
 sys.setrecursionlimit(4000)
 
-VERSION = "0.3.1"
+VERSION = "0.4.0"
+
+# arguments passed to the running program (आदेशचराः)
+PROGRAM_ARGS: list = []
 
 # ---------------------------------------------------------------- digits
 
@@ -68,6 +82,7 @@ ALIASES = {
     "prayata": "प्रयत", "prayat": "प्रयत",
     "doshe": "दोषे",
     "aanaya": "आनय", "anaya": "आनय",
+    "kshipa": "क्षिप", "kship": "क्षिप",
     "aarambha": "आरम्भ", "arambha": "आरम्भ",   # constructor name (identifier)
     # kāraka role labels
     "kartaa": "कर्ता", "karta": "कर्ता",
@@ -106,12 +121,14 @@ KEYWORDS = {"मानय", "ध्रुव", "यदि", "अथ", "अन्
             "सत्यम्", "असत्यम्", "शून्यम्", "च", "वा", "न",
             "विरम", "अनुवर्त",
             "विधि", "फलम्", "प्रत्येकम्", "इति", "वर्गः", "सृज",
-            "प्रयत", "दोषे", "आनय"}
+            "प्रयत", "दोषे", "आनय", "क्षिप"}
 
 BUILTIN_NAMES = {"वद", "पृच्छ", "वाक्यम्", "सङ्ख्या", "प्रकारः", "दैर्घ्यम्",
-                 "योजय", "अपनय", "कुञ्जिकाः", "क्रमय", "परिधिः"}
+                 "योजय", "अपनय", "कुञ्जिकाः", "क्रमय", "परिधिः", "आदेशचराः",
+                 "द्रुतदशमांशः"}
 
-TYPE_NAMES = {"पूर्णाङ्कः", "दशमांशः", "वाक्यम्", "सत्यासत्यम्", "सूची", "कोशः"}
+TYPE_NAMES = {"पूर्णाङ्कः", "दशमांशः", "द्रुतदशमांशः", "वाक्यम्",
+              "सत्यासत्यम्", "सूची", "कोशः"}
 
 KARAKAS = {"कर्ता", "कर्म", "करण", "सम्प्रदान", "अपादान", "अधिकरण"}
 
@@ -185,6 +202,22 @@ class SanskritaError(Exception):
         super().__init__(msg)
 
 
+class PrecheckError(SanskritaError):
+    """Several problems proved before the program ran — reported together, so
+    you fix them in one pass instead of one crash at a time."""
+    def __init__(self, problems):
+        self.problems = problems
+        n = len(problems)
+        head = (f"प्राक्परीक्षायाम् {to_dev_digits(str(n))} दोषाः — "
+                f"कोऽपि आदेशः न चालितः\n"
+                f"{n} problems found before running — nothing was executed")
+        body = "\n\n".join(str(p) for p in problems)
+        self.line = problems[0].line
+        self.sa = head
+        self.en = head
+        Exception.__init__(self, f"{head}\n\n{body}")
+
+
 class BreakSignal(Exception):
     def __init__(self, line):
         self.line = line
@@ -211,13 +244,15 @@ def type_name_of(v):
         return "पूर्णाङ्कः"
     if isinstance(v, Decimal):
         return "दशमांशः"
+    if isinstance(v, float):
+        return "द्रुतदशमांशः"
     if isinstance(v, str):
         return "वाक्यम्"
     if isinstance(v, list):
         return "सूची"
     if isinstance(v, dict):
         return "कोशः"
-    if isinstance(v, (SFunction, Builtin, BoundMethod)):
+    if isinstance(v, (SFunction, Builtin, BoundMethod, NativeMethod)):
         return "विधिः"
     if isinstance(v, SClass):
         return "वर्गः"
@@ -235,6 +270,8 @@ def type_matches(typename, v):
         return isinstance(v, int) and not isinstance(v, bool)
     if typename == "दशमांशः":
         return isinstance(v, (int, Decimal)) and not isinstance(v, bool)
+    if typename == "द्रुतदशमांशः":
+        return isinstance(v, float)
     if typename == "वाक्यम्":
         return isinstance(v, str)
     if typename == "सत्यासत्यम्":
@@ -294,7 +331,7 @@ def lex(src: str):
             i = j; continue
         if src[i:i + 2] in ("==", "!=", "<=", ">="):   # two-char operators
             toks.append(("OP", src[i:i + 2], line)); i += 2; continue
-        if c in "+-*/%<>=(){}[],:.":
+        if c in "+-*/%<>=(){}[],:.?":
             toks.append(("OP", c, line)); i += 1; continue
         cat = unicodedata.category(c)
         if c == "_" or cat[0] == "L":                  # identifier / keyword
@@ -377,6 +414,10 @@ class Parser:
                 kind = "let" if tok[1] == "मानय" else "const"
                 self.advance()
                 name_tok = self.expect_id("नाम अपेक्षितम्", "expected a name")
+                nullable = False
+                if self.at("OP", "?"):                 # शून्यम्-safety opt-in
+                    self.advance()
+                    nullable = True
                 typename = None                        # optional : प्रकारः
                 if self.at("OP", ":"):
                     self.advance()
@@ -385,14 +426,16 @@ class Parser:
                         got = t[1] if t[0] in ("ID", "KW") else ""
                         raise SanskritaError(
                             t[2],
-                            f"अज्ञातः प्रकारः '{got}' — प्रकाराः: पूर्णाङ्कः, दशमांशः, वाक्यम्, सत्यासत्यम्, सूची, कोशः",
+                            f"अज्ञातः प्रकारः '{got}' — प्रकाराः: पूर्णाङ्कः, दशमांशः, द्रुतदशमांशः, वाक्यम्, सत्यासत्यम्, सूची, कोशः",
                             f"unknown type '{got}' — types are: पूर्णाङ्कः (int), दशमांशः (decimal), "
-                            f"वाक्यम् (text), सत्यासत्यम् (boolean), सूची (list), कोशः (map)")
+                            f"द्रुतदशमांशः (fast float), वाक्यम् (text), सत्यासत्यम् (boolean), "
+                            f"सूची (list), कोशः (map)")
                     typename = t[1]
                 self.expect_op("=", "'=' अपेक्षितम्", "expected '='")
                 expr = self.expression()
                 self.end_stmt()
-                return (kind, name_tok[1], expr, name_tok[2], typename)
+                return (kind, name_tok[1], expr, name_tok[2],
+                        (typename, nullable) if typename else None)
             if tok[1] == "विरम":
                 self.advance(); self.end_stmt()
                 return ("break", tok[2])
@@ -439,6 +482,11 @@ class Parser:
                 self.expect_op(")", "')' अपेक्षितम्", "expected ')'")
                 catch_body = self.block()
                 return ("try", try_body, err_tok[1], catch_body, tok[2])
+            if tok[1] == "क्षिप":
+                self.advance()
+                expr = self.expression()
+                self.end_stmt()
+                return ("throw", expr, tok[2])
             if tok[1] == "आनय":
                 self.advance()
                 mod_tok = self.advance()
@@ -490,15 +538,24 @@ class Parser:
 
     def param(self):
         first = self.expect_id("मापदण्डनाम अपेक्षितम्", "expected a parameter name")
+        label = None
+        name = first[1]
         if self.at("ID"):                              # kāraka-labeled parameter
             if first[1] not in KARAKAS:
                 raise SanskritaError(first[2],
                                      f"'{first[1]}' कारकं न — कारकाणि: कर्ता, कर्म, करण, सम्प्रदान, अपादान, अधिकरण",
                                      f"'{first[1]}' is not a kāraka — roles are: कर्ता (agent), कर्म (object), "
                                      f"करण (instrument), सम्प्रदान (recipient), अपादान (source), अधिकरण (location)")
-            name_tok = self.advance()
-            return (first[1], name_tok[1])
-        return (None, first[1])
+            label = first[1]
+            name = self.advance()[1]
+        # §2b: default values. The EXPRESSION is stored, never a shared object —
+        # it is evaluated fresh on every call, so Python's mutable-default bug
+        # (`def f(x=[])`) cannot happen here.
+        default = None
+        if self.at("OP", "="):
+            self.advance()
+            default = self.expression()
+        return (label, name, default)
 
     def class_def(self):
         tok = self.advance()                           # वर्गः
@@ -745,7 +802,7 @@ class SFunction:
 
     def __init__(self, name, params, body, closure):
         self.name = name
-        self.params = params          # list of (kāraka-label or None, name)
+        self.params = params          # list of (kāraka-label or None, name, default-expr or None)
         self.body = body
         self.closure = closure
 
@@ -789,6 +846,22 @@ class PyVal:
         self.raw = raw
 
 
+class RawFn:
+    """A native function that receives संस्कृता values AS THEY ARE — no trip
+    through Python floats.
+
+    This matters more than it looks. `to_py` turns a Decimal into a float so the
+    Python bridge can use it; if a *native* module went through the same door,
+    सू.योगः([०.१, ०.२]) would quietly answer ०.३०००००००००००००००४ and the
+    language's headline promise would be false at the library boundary.
+    Anything that touches numbers must be a RawFn.
+    """
+    __slots__ = ("fn",)
+
+    def __init__(self, fn):
+        self.fn = fn
+
+
 class SModule:
     """A user's own .सं file, imported as a namespace (आनय "x.सं" इति नाम।)."""
     def __init__(self, name, env):
@@ -811,6 +884,8 @@ def to_py(v):
 
 def to_sk(v):
     if isinstance(v, bool) or v is None or isinstance(v, (int, str)):
+        return v
+    if isinstance(v, Decimal):     # already a संस्कृता number — never re-wrap it
         return v
     if isinstance(v, float):
         return Decimal(repr(v))
@@ -1133,7 +1208,204 @@ def _make_vakyakarma():
     setattr(ns, 'खोज', lambda t, sub: t.find(sub) + 1)          # find (1-based; ० = absent)
     setattr(ns, 'प्रतिस्थापय', lambda t, a, b: t.replace(a, b))  # replace
     setattr(ns, 'अंश', lambda t, i, j: t[i - 1:j])              # substring (1-based, incl.)
+    setattr(ns, 'उच्च', lambda t: t.upper())                    # upper-case
+    setattr(ns, 'निम्न', lambda t: t.lower())                   # lower-case
+    setattr(ns, 'परिष्कार', lambda t: t.strip())                # trim
+    setattr(ns, 'आरभते', lambda t, p: t.startswith(p))          # starts with
+    setattr(ns, 'अन्तयति', lambda t, p: t.endswith(p))          # ends with
+    setattr(ns, 'अन्तर्भवति', lambda t, p: p in t)              # contains
     return ns
+
+
+def _make_suchikarma():
+    """सूचीकर्म — list operations (blueprint §6).
+
+    Every function here is a RawFn: it sees संस्कृता values, not Python floats,
+    so ०.१ + ०.२ stays ०.३ even inside सू.योगः.
+    """
+    import types
+    ns = types.SimpleNamespace()
+
+    def _need_list(lst, who):
+        if not isinstance(lst, list):
+            raise SanskritaError(0, f"{who} सूचीम् अपेक्षते", f"{who} expects a list")
+        return lst
+
+    def _filter(lst, f):
+        out = []
+        for x in _need_list(lst, "छानय()"):
+            keep = f(x)
+            if not isinstance(keep, bool):
+                raise SanskritaError(
+                    0, f"छानय() सत्यासत्यम् अपेक्षते, {type_name_of(keep)} प्राप्तम्",
+                    "छानय() expects the function to return सत्यम्/असत्यम्")
+            if keep:
+                out.append(x)
+        return out
+
+    def _reduce(lst, f, init):
+        acc = init
+        for x in _need_list(lst, "न्यूनीकरण()"):
+            acc = f(acc, x)
+        return acc
+
+    def _index(lst, v):
+        for i, x in enumerate(_need_list(lst, "अनुक्रमः()")):
+            if x == v:
+                return i + 1                      # 1-based; ० means absent
+        return 0
+
+    def _unique(lst):
+        out = []
+        for x in _need_list(lst, "अद्वितीयम्()"):
+            if not any(y == x for y in out):
+                out.append(x)                     # order kept, first one wins
+        return out
+
+    def _extreme(lst, who, pick):
+        items = _need_list(lst, who)
+        if not items:
+            raise SanskritaError(0, f"{who} रिक्तायाः सूच्याः न शक्यम्",
+                                 f"{who} of an empty list")
+        best = items[0]
+        for x in items[1:]:
+            if pick(x, best):
+                best = x
+        return best
+
+    def _sum(lst):
+        acc = 0
+        for x in _need_list(lst, "योगः()"):
+            if isinstance(x, bool) or not isinstance(x, (int, float, Decimal)):
+                raise SanskritaError(0, "योगः() सङ्ख्याः अपेक्षते",
+                                     "योगः() expects a list of numbers")
+            acc = acc + x
+        return acc
+
+    for dev_name, fn in (
+        ('छानय', _filter),                                        # filter
+        ('प्रतिचित्रय', lambda lst, f: [f(x) for x in _need_list(lst, "प्रतिचित्रय()")]),
+        ('न्यूनीकरण', _reduce),                                    # reduce
+        ('विपर्यय', lambda lst: list(reversed(_need_list(lst, "विपर्यय()")))),
+        ('अन्तर्भवति', lambda lst, v: any(x == v for x in _need_list(lst, "अन्तर्भवति()"))),
+        ('अनुक्रमः', _index),
+        ('योगः', _sum),
+        ('महत्तमम्', lambda lst: _extreme(lst, "महत्तमम्()", lambda a, b: a > b)),
+        ('लघुत्तमम्', lambda lst: _extreme(lst, "लघुत्तमम्()", lambda a, b: a < b)),
+        ('अद्वितीयम्', _unique),
+    ):
+        setattr(ns, dev_name, RawFn(fn))
+    return ns
+
+
+def _make_sanchika():
+    """सञ्चिका — file I/O (blueprint §6). Text files, UTF-8, always."""
+    import os
+    import types
+    ns = types.SimpleNamespace()
+    setattr(ns, 'पठ', lambda p: open(p, encoding='utf-8').read())
+    setattr(ns, 'लिख', lambda p, t: (open(p, 'w', encoding='utf-8').write(t), None)[1])
+    setattr(ns, 'योजय', lambda p, t: (open(p, 'a', encoding='utf-8').write(t), None)[1])
+    setattr(ns, 'अस्ति', lambda p: os.path.exists(p))
+    setattr(ns, 'निष्कासय', lambda p: (os.remove(p), None)[1])
+    setattr(ns, 'पङ्क्तयः', lambda p: open(p, encoding='utf-8').read().splitlines())
+    setattr(ns, 'सूचिका', lambda p: sorted(os.listdir(p)))
+    return ns
+
+
+def _make_json():
+    """जेसन — JSON, the world's data interchange format.
+
+    Hand-written on both sides, because Python's json module speaks float and
+    we do not: a दशमांशः that goes into a file must come back the same digits.
+    Mirrors rust-engine/src/stdlib.rs so the two engines agree byte for byte.
+    """
+    import json as _json
+    import types
+    ns = types.SimpleNamespace()
+
+    _ESCAPES = {'"': '\\"', '\\': '\\\\', '\n': '\\n', '\t': '\\t', '\r': '\\r'}
+
+    def _write_str(t):
+        out = ['"']
+        for c in t:
+            if c in _ESCAPES:
+                out.append(_ESCAPES[c])
+            elif ord(c) < 0x20:
+                out.append("\\u%04x" % ord(c))
+            else:
+                out.append(c)          # ensure_ascii=False: Unicode passes through
+        out.append('"')
+        return "".join(out)
+
+    def _write(v):
+        if v is None:
+            return "null"
+        if isinstance(v, bool):
+            return "true" if v else "false"
+        if isinstance(v, Decimal):
+            return format(v, "f")      # exactly the digits we hold
+        if isinstance(v, float):
+            return repr(v)
+        if isinstance(v, int):
+            return str(v)
+        if isinstance(v, str):
+            return _write_str(v)
+        if isinstance(v, list):
+            return "[" + ", ".join(_write(x) for x in v) + "]"
+        if isinstance(v, dict):
+            return "{" + ", ".join(f"{_write_str(str(k))}: {_write(x)}"
+                                   for k, x in v.items()) + "}"
+        raise SanskritaError(0, f"जेसन {type_name_of(v)} न पाठयति",
+                             f"जेसन cannot serialise {type_name_of(v)}")
+
+    def _parse(t):
+        if not isinstance(t, str):
+            raise SanskritaError(0, "विश्लेषय() वाक्यम् अपेक्षते",
+                                 "विश्लेषय() expects text")
+        try:
+            # parse_float=Decimal is the whole point: no float ever exists
+            return _json.loads(t, parse_float=Decimal)
+        except ValueError as err:
+            raise SanskritaError(0, f"जेसन-दोषः — {err}", f"JSON error — {err}")
+
+    setattr(ns, 'विश्लेषय', RawFn(_parse))      # parse
+    setattr(ns, 'पाठय', RawFn(_write))          # stringify
+    return ns
+
+
+# ------------------------------------------------------- built-in methods
+# §7d #2 — "sandhi-style composition": chain operations the way Sanskrit
+# compounds words.  सूची.छानय(…).क्रमय().विपर्यय()
+#
+# These are not new functions: `.नाम` on a सूची / कोशः / वाक्यम् resolves to the
+# SAME stdlib function you would call as सू.नाम(सूची, …), with the receiver
+# supplied as the first argument. One implementation, two spellings.
+BUILTIN_METHODS = {
+    'सूची': ('सूचीकर्म', ['छानय', 'प्रतिचित्रय', 'न्यूनीकरण', 'विपर्यय',
+                          'अन्तर्भवति', 'अनुक्रमः', 'योगः', 'महत्तमम्',
+                          'लघुत्तमम्', 'अद्वितीयम्']),
+    'वाक्यम्': ('वाक्यकर्म', ['विभज', 'खोज', 'प्रतिस्थापय', 'अंश', 'उच्च',
+                              'निम्न', 'परिष्कार', 'आरभते', 'अन्तयति',
+                              'अन्तर्भवति']),
+}
+
+# builtins that also read naturally as methods: सूची.क्रमय(), वाक्यम्.दैर्घ्यम्()
+BUILTIN_METHOD_BUILTINS = {
+    'सूची': ['क्रमय', 'दैर्घ्यम्', 'योजय', 'अपनय'],
+    'कोशः': ['कुञ्जिकाः', 'दैर्घ्यम्', 'अपनय'],
+    'वाक्यम्': ['दैर्घ्यम्'],
+}
+
+
+class NativeMethod:
+    """A stdlib function or builtin with its receiver already bound."""
+    __slots__ = ("recv", "module", "name")
+
+    def __init__(self, recv, module, name):
+        self.recv = recv
+        self.module = module       # None → a builtin, not a module function
+        self.name = name
 
 
 NATIVE_MODULES = {
@@ -1142,6 +1414,9 @@ NATIVE_MODULES = {
     'यादृच्छिकम्': _make_yadrcchikam, 'yadrcchikam': _make_yadrcchikam,
     'कालः': _make_kalah, 'kalah': _make_kalah,
     'वाक्यकर्म': _make_vakyakarma, 'vakyakarma': _make_vakyakarma,
+    'सूचीकर्म': _make_suchikarma, 'suchikarma': _make_suchikarma,
+    'सञ्चिका': _make_sanchika, 'sanchika': _make_sanchika,
+    'जेसन': _make_json, 'json': _make_json,
 }
 
 # ----------------------------------------------------------- interpreter
@@ -1165,6 +1440,12 @@ class Interpreter:
             return "सत्यम्" if v else "असत्यम्"
         if v is None:
             return "शून्यम्"
+        if isinstance(v, float):
+            # द्रुतदशमांशः prints exactly what IEEE-754 holds — including the
+            # famous 0.30000000000000004. Nothing is hidden; that honesty is
+            # the point of making the fast type opt-in.
+            s = repr(v)
+            return s if self.roman else to_dev_digits(s)
         if isinstance(v, (int, Decimal)):
             s = format(v, "f") if isinstance(v, Decimal) else str(v)  # no E-notation
             return s if self.roman else to_dev_digits(s)
@@ -1206,8 +1487,9 @@ class Interpreter:
                                      f"'{name}' is a constant — cannot redeclare")
             val = self.eval(expr, env)
             if typename:
-                self.check_type(name, typename, val, line)
-                env.types[name] = typename
+                tname, nullable = typename
+                self.check_type(name, tname, val, line, nullable)
+                env.types[name] = (tname, nullable)
             else:
                 env.types.pop(name, None)
             env.vars[name] = val
@@ -1226,7 +1508,8 @@ class Interpreter:
                                                  f"'{name}' ध्रुवः — परिवर्तनं न शक्यम्",
                                                  f"'{name}' is a constant — cannot change it")
                         if en.types and name in en.types:
-                            self.check_type(name, en.types[name], val, line)
+                            tname, nullable = en.types[name]
+                            self.check_type(name, tname, val, line, nullable)
                         en.vars[name] = val
                         return
                     en = en.parent
@@ -1234,6 +1517,11 @@ class Interpreter:
                                      f"'{name}' अघोषितम् — प्रथमं 'मानय' प्रयुज्यताम्",
                                      f"'{name}' not declared — declare it first with मानय/maanaya")
             self.assign(target, val, env, line)
+        elif kind == "throw":
+            _, expr, line = st
+            msg = self.eval(expr, env)
+            text = msg if isinstance(msg, str) else self.display(msg)
+            raise SanskritaError(line, text, text)
         elif kind == "break":
             raise BreakSignal(st[1])
         elif kind == "continue":
@@ -1311,8 +1599,11 @@ class Interpreter:
                 self.run(catch_body, env)
         elif kind == "import":
             _, mod, alias, line = st
-            modname = mod[7:] if mod.startswith("python:") else mod
-            if modname in NATIVE_MODULES:              # native संस्कृता modules
+            is_python = mod.startswith("python:")
+            modname = mod[7:] if is_python else mod
+            # An explicit "python:" prefix always means the bridge, even when a
+            # native module shares the name (e.g. json vs our जेसन).
+            if not is_python and modname in NATIVE_MODULES:
                 env.vars[alias] = PyVal(NATIVE_MODULES[modname]())
                 return
             if modname.endswith((".सं", ".sam")):      # the user's own .सं files!
@@ -1364,7 +1655,8 @@ class Interpreter:
                 raise SanskritaError(line, f"'{name}' ध्रुवः — परिवर्तनं न शक्यम्",
                                      f"'{name}' is a constant — cannot change it")
             if name in holder.types:
-                self.check_type(name, holder.types[name], val, line)
+                tname, nullable = holder.types[name]
+                self.check_type(name, tname, val, line, nullable)
             holder.vars[name] = val
         elif kind == "index":
             obj = self.eval(target[1], env)
@@ -1388,7 +1680,18 @@ class Interpreter:
                 raise SanskritaError(line, f"{type_name_of(obj)} गुणं न गृह्णाति",
                                      f"cannot set attribute on {type_name_of(obj)}")
 
-    def check_type(self, name, typename, val, line):
+    def check_type(self, name, typename, val, line, nullable=False):
+        # §2b: the "billion-dollar mistake" fix — a typed variable cannot hold
+        # शून्यम् unless it was declared nullable with '?'.
+        if val is None:
+            if nullable:
+                return
+            raise SanskritaError(
+                line,
+                f"'{name}' शून्यं न स्वीकरोति — घोषणे '?' प्रयुज्यताम् "
+                f"(मानय {name}? : {typename} = शून्यम्।)",
+                f"'{name}' cannot hold शून्यम् — declare it nullable with '?' "
+                f"(मानय {name}? : {typename} = शून्यम्।)")
         if not type_matches(typename, val):
             raise SanskritaError(
                 line,
@@ -1519,12 +1822,21 @@ class Interpreter:
                                      f"module '{obj.name}' has no '{name}'{en_h}")
             if isinstance(obj, PyVal):
                 try:
-                    return to_sk(getattr(obj.raw, name))
+                    got = getattr(obj.raw, name)
+                    return PyVal(got) if isinstance(got, RawFn) else to_sk(got)
                 except AttributeError:
                     raise SanskritaError(line, f"python-वस्तुनि '{name}' नास्ति",
                                          f"python object has no attribute '{name}'")
-            raise SanskritaError(line, f"{type_name_of(obj)} '.{name}' न जानाति",
-                                 f"{type_name_of(obj)} has no attribute '.{name}'")
+            tname = type_name_of(obj)
+            mod, names = BUILTIN_METHODS.get(tname, (None, []))
+            if name in names:
+                return NativeMethod(obj, mod, name)
+            if name in BUILTIN_METHOD_BUILTINS.get(tname, []):
+                return NativeMethod(obj, None, name)
+            available = sorted(set(names) | set(BUILTIN_METHOD_BUILTINS.get(tname, [])))
+            sa_h, en_h = hint_for(name, available) if available else ("", "")
+            raise SanskritaError(line, f"{tname} '.{name}' न जानाति{sa_h}",
+                                 f"{tname} has no method '.{name}'{en_h}")
         raise SanskritaError(e[-1], "आन्तरिकदोषः", "internal error")
 
     def list_index(self, seq, idx, line):
@@ -1542,6 +1854,26 @@ class Interpreter:
     def call_value(self, fval, args, line):
         if isinstance(fval, Builtin):
             return self.call_builtin(fval.name, [v for _, v in args], line)
+        if isinstance(fval, NativeMethod):
+            # §7d #2 — the receiver becomes the first argument, so
+            # सूची.छानय(f) IS सू.छानय(सूची, f). Same code, same result.
+            if any(lab is not None for lab, _ in args):
+                raise SanskritaError(line, "अन्तर्निहितविधयः कारकं न गृह्णन्ति",
+                                     "built-in methods do not take kāraka labels")
+            vals = [fval.recv] + [v for _, v in args]
+            if fval.module is None:
+                return self.call_builtin(fval.name, vals, line)
+            ns = NATIVE_MODULES[fval.module]()
+            fn = getattr(ns, fval.name)
+            if isinstance(fn, RawFn):
+                return self._call_raw(fn.fn, vals, line, fval.name)
+            try:
+                return to_sk(fn(*[self._to_py_arg(v, line) for v in vals]))
+            except SanskritaError:
+                raise
+            except Exception as err:
+                raise SanskritaError(line, f"'{fval.name}' दोषः: {err}",
+                                     f"'{fval.name}' error: {err}")
         if isinstance(fval, BoundMethod):
             return self.call_function(fval.func, args, line, self_val=fval.instance)
         if isinstance(fval, SFunction):
@@ -1556,17 +1888,50 @@ class Interpreter:
                                      f"class '{fval.name}' has no 'आरम्भ' (constructor) but got arguments")
             return inst
         if isinstance(fval, PyVal):
+            if isinstance(fval.raw, RawFn):
+                # a native module function that must NOT see Python floats
+                return self._call_raw(fval.raw.fn, [v for _, v in args], line,
+                                      "कोष्ठकविधिः")
             if not callable(fval.raw):
                 raise SanskritaError(line, "एतत् python-वस्तु आह्वातुं न शक्यम्",
                                      "this python object is not callable")
-            pos = [to_py(v) for lab, v in args if lab is None]
-            kw = {lab: to_py(v) for lab, v in args if lab is not None}
+            pos = [self._to_py_arg(v, line) for lab, v in args if lab is None]
+            kw = {lab: self._to_py_arg(v, line) for lab, v in args if lab is not None}
             try:
                 return to_sk(fval.raw(*pos, **kw))
             except Exception as err:
                 raise SanskritaError(line, f"python-दोषः: {err}", f"python error: {err}")
         raise SanskritaError(line, f"{type_name_of(fval)} आह्वातुं न शक्यम्",
                              f"cannot call a {type_name_of(fval)}")
+
+    def _to_raw_arg(self, v, line):
+        """Argument for a RawFn: संस्कृता values pass through untouched; a
+        संस्कृता विधि becomes a plain callable that still speaks संस्कृता."""
+        if isinstance(v, (SFunction, BoundMethod, Builtin, NativeMethod)):
+            def _callback(*sk_args):
+                return self.call_value(v, [(None, a) for a in sk_args], line)
+            return _callback
+        return v
+
+    def _call_raw(self, fn, vals, line, who):
+        try:
+            return fn(*[self._to_raw_arg(v, line) for v in vals])
+        except SanskritaError as err:
+            # RawFns raise with line 0; stamp the real call site on it
+            raise SanskritaError(line, err.sa, err.en) if err.line == 0 else err
+        except (TypeError, ValueError, IndexError, KeyError) as err:
+            raise SanskritaError(line, f"'{who}' दोषः: {err}", f"'{who}' error: {err}")
+
+    def _to_py_arg(self, v, line):
+        """Convert a संस्कृता value for a native/python call. संस्कृता functions
+        become real Python callables, so stdlib higher-order functions
+        (सूचीकर्म.छानय, .प्रतिचित्रय, …) can invoke them."""
+        if isinstance(v, (SFunction, BoundMethod, Builtin)):
+            def _callback(*py_args):
+                sk_args = [(None, to_sk(a)) for a in py_args]
+                return to_py(self.call_value(v, sk_args, line))
+            return _callback
+        return to_py(v)
 
     def call_function(self, fn, args, line, self_val=None):
         local = Env(parent=fn.closure)
@@ -1575,7 +1940,7 @@ class Interpreter:
         if (self_val is None and len(args) == len(params)
                 and not any(lab is not None for lab, _ in args)):
             lv = local.vars
-            for (lab, v), (plab, pname) in zip(args, params):
+            for (lab, v), (plab, pname, _pdef) in zip(args, params):
                 lv[pname] = v
             try:
                 self.run(fn.body, local)
@@ -1586,18 +1951,21 @@ class Interpreter:
             local.vars["अयम्"] = self_val
         positional = [v for lab, v in args if lab is None]
         labeled = {lab: v for lab, v in args if lab is not None}
-        for plab, pname in fn.params:
+        for plab, pname, pdef in fn.params:
             if plab is not None and plab in labeled:
                 local.vars[pname] = labeled.pop(plab)
             elif positional:
                 local.vars[pname] = positional.pop(0)
+            elif pdef is not None:
+                # evaluated FRESH, in the function's own scope, on every call
+                local.vars[pname] = self.eval(pdef, local)
             else:
                 role = f" ({plab})" if plab else ""
                 raise SanskritaError(line,
                                      f"'{fn.name}' विधौ '{pname}'{role} इत्यस्य मूल्यं न दत्तम्",
                                      f"function '{fn.name}' missing argument '{pname}'{role}")
         if labeled:
-            valid = ", ".join(f"{l}" for l, _ in fn.params if l) or "—"
+            valid = ", ".join(f"{l}" for l, _, _ in fn.params if l) or "—"
             raise SanskritaError(line,
                                  f"'{fn.name}' विधौ अज्ञातं कारकम् '{next(iter(labeled))}' — विधेः कारकाणि: {valid}",
                                  f"function '{fn.name}' has no role '{next(iter(labeled))}' — its roles are: {valid}")
@@ -1665,6 +2033,23 @@ class Interpreter:
                                      "अपनय(list, index) or अपनय(map, key)")
             i = self.list_index(vals[0], vals[1], line)
             return vals[0].pop(i - 1)
+        if name == "द्रुतदशमांशः":
+            # §2b — the opt-in fast path. Binary floats are what every other
+            # language gives you by default; here you must ask, and the name
+            # says what you are trading: द्रुत (fast), not शुद्ध (exact).
+            if len(vals) != 1 or isinstance(vals[0], bool) or \
+               not isinstance(vals[0], (int, float, Decimal, str)):
+                raise SanskritaError(line, "द्रुतदशमांशः() एकां सङ्ख्यां गृह्णाति",
+                                     "द्रुतदशमांशः() takes one number")
+            try:
+                return float(to_ascii_digits(vals[0]) if isinstance(vals[0], str)
+                             else vals[0])
+            except ValueError:
+                raise SanskritaError(line, f"'{vals[0]}' सङ्ख्या न",
+                                     f"'{vals[0]}' is not a number")
+        if name == "आदेशचराः":
+            # command-line arguments given after the program path
+            return list(PROGRAM_ARGS)
         if name == "परिधिः":
             ok = (len(vals) == 2 and all(isinstance(v, int)
                   and not isinstance(v, bool) for v in vals))
@@ -1723,6 +2108,26 @@ class Interpreter:
             raise SanskritaError(line,
                                  "वाक्यं सङ्ख्या च न मिश्रणीये — 'वाक्यम्()' प्रयुज्यताम्",
                                  "cannot mix text and number — convert with वाक्यम्()/vaakyam()")
+        if isinstance(a, float) or isinstance(b, float):
+            # द्रुतदशमांशः is contagious: once you opt into binary floats, the
+            # result is a binary float. Mixing is allowed but never silent —
+            # प्रकारः() will tell you what you are holding.
+            if not isinstance(a, (int, float, Decimal)) or \
+               not isinstance(b, (int, float, Decimal)):
+                raise SanskritaError(line, "सङ्ख्ये अपेक्षिते", "expected numbers")
+            fa, fb = float(a), float(b)
+            if op in ("/", "%") and fb == 0.0:
+                raise SanskritaError(line, "शून्येन भागो न शक्यः", "division by zero")
+            if op == "+":
+                return fa + fb
+            if op == "-":
+                return fa - fb
+            if op == "*":
+                return fa * fb
+            if op == "/":
+                return fa / fb
+            if op == "%":
+                return fa % fb
         if not isinstance(a, (int, Decimal)) or not isinstance(b, (int, Decimal)):
             raise SanskritaError(line, "सङ्ख्ये अपेक्षिते", "expected numbers")
         if op == "+":
@@ -1746,11 +2151,156 @@ class Interpreter:
 
 # ------------------------------------------------------------------ main
 
-BANNER = """ॐ  संस्कृता ०.२ — वृक्षः   (Sanskrita v0.2 'Tree')
+BANNER = f"""ॐ  संस्कृता {to_dev_digits(VERSION)} — फलम्   (Sanskrita v{VERSION} 'Fruit')
 लिखतु आदेशम्; निर्गमाय Ctrl-D    (type code; Ctrl-D to exit)"""
+
+# ------------------------------------------------- प्राक्परीक्षा (pre-flight)
+# §2b promises that type annotations are checked BEFORE the program runs, not
+# when execution stumbles into them. This pass walks the syntax tree and
+# reports every violation it can PROVE from the source alone. It is deliberately
+# conservative: it never guesses. Anything it cannot prove is left to the
+# runtime check, which still stands behind it.
+
+def _literal_type(e):
+    """The type name of an expression whose type is knowable without running
+    the program — or None when it isn't."""
+    kind = e[0]
+    if kind == "lit":
+        v = e[1]
+        if v is None:
+            return "शून्यम्"
+        if isinstance(v, bool):
+            return "सत्यासत्यम्"
+        if isinstance(v, int):
+            return "पूर्णाङ्कः"
+        if isinstance(v, Decimal):
+            return "दशमांशः"
+        if isinstance(v, str):
+            return "वाक्यम्"
+        return None
+    if kind == "list":
+        return "सूची"
+    if kind == "map":
+        return "कोशः"
+    if kind == "funcexpr":
+        return "विधिः"
+    if kind == "bin" and e[1] in ("<", ">", "<=", ">=", "==", "!=", "च", "वा"):
+        return "सत्यासत्यम्"
+    if kind == "unary" and e[1] == "न":
+        return "सत्यासत्यम्"
+    return None
+
+
+def _type_ok(declared, actual):
+    if actual is None:
+        return True                       # unknown → runtime decides
+    if declared == "दशमांशः":
+        return actual in ("दशमांशः", "पूर्णाङ्कः")
+    return declared == actual
+
+
+def precheck(stmts):
+    """Return a list of SanskritaError found statically. Empty list = clean."""
+    found = []
+
+    def walk(sts):
+        for st in sts:
+            kind = st[0]
+            if kind in ("let", "const"):
+                _, name, expr, line, typename = st
+                if typename:
+                    tname, nullable = typename
+                    actual = _literal_type(expr)
+                    if actual == "शून्यम्" and not nullable:
+                        found.append(SanskritaError(
+                            line,
+                            f"'{name}' शून्यं न स्वीकरोति — घोषणे '?' प्रयुज्यताम् "
+                            f"(मानय {name}? : {tname} = शून्यम्।)",
+                            f"'{name}' cannot hold शून्यम् — declare it nullable "
+                            f"with '?' (मानय {name}? : {tname} = शून्यम्।)"))
+                    elif actual is not None and actual != "शून्यम्" \
+                            and not _type_ok(tname, actual):
+                        found.append(SanskritaError(
+                            line,
+                            f"प्रकारदोषः — '{name}' {tname} इति घोषितम्, {actual} प्राप्तम्",
+                            f"type error — '{name}' is declared {tname}, got {actual}"))
+                walk_expr(expr)
+            elif kind == "assign":
+                walk_expr(st[2])
+            elif kind == "expr":
+                walk_expr(st[1])
+            elif kind == "if":
+                for cond, body in st[1]:
+                    walk_expr(cond)
+                    walk(body)
+                if st[2] is not None:
+                    walk(st[2])
+            elif kind == "while":
+                walk_expr(st[1]); walk(st[2])
+            elif kind == "foreach":
+                walk_expr(st[2]); walk(st[3])
+            elif kind == "func":
+                walk(st[3])
+            elif kind == "class":
+                for md in st[3]:
+                    walk(md[3])
+            elif kind == "try":
+                walk(st[1]); walk(st[3])
+            elif kind in ("return", "throw"):
+                if st[1] is not None:
+                    walk_expr(st[1])
+
+    def walk_expr(e):
+        if not isinstance(e, tuple):
+            return
+        kind = e[0]
+        if kind == "bin":
+            _, op, le, re_, line = e
+            lt, rt = _literal_type(le), _literal_type(re_)
+            if op in ("+", "-", "*", "/", "%") and lt and rt:
+                text = {"वाक्यम्"}
+                nums = {"पूर्णाङ्कः", "दशमांशः"}
+                if (lt in text) != (rt in text) and (lt in nums or rt in nums):
+                    found.append(SanskritaError(
+                        line,
+                        "वाक्यं सङ्ख्या च न मिश्रणीये — 'वाक्यम्()' प्रयुज्यताम्",
+                        "cannot mix text and number — convert with "
+                        "वाक्यम्()/vaakyam()"))
+                elif op != "+" and (lt in text or rt in text):
+                    found.append(SanskritaError(
+                        line, "वाक्येषु एतत् गणितं न शक्यम्",
+                        f"'{op}' does not work on text"))
+            walk_expr(le); walk_expr(re_)
+        elif kind in ("unary",):
+            walk_expr(e[2])
+        elif kind == "call":
+            walk_expr(e[1])
+            for _lab, a in e[2]:
+                walk_expr(a)
+        elif kind == "index":
+            walk_expr(e[1]); walk_expr(e[2])
+        elif kind == "attr":
+            walk_expr(e[1])
+        elif kind == "list":
+            for x in e[1]:
+                walk_expr(x)
+        elif kind == "map":
+            for k, v in e[1]:
+                walk_expr(k); walk_expr(v)
+        elif kind == "funcexpr":
+            walk(e[2])
+        elif kind == "new":
+            walk_expr(e[1])
+
+    walk(stmts)
+    return found
+
 
 def run_source(src, interp, repl=False):
     stmts = Parser(lex(src)).program()
+    problems = precheck(stmts)            # §2b — checked BEFORE anything runs
+    if problems:
+        raise problems[0] if len(problems) == 1 else PrecheckError(problems)
     try:
         interp.run(stmts, repl=repl)
     except (BreakSignal, ContinueSignal) as sig:
@@ -1791,6 +2341,33 @@ def repl(interp):
         except SanskritaError as err:
             print(err)
 
+def run_with_veg(argv):
+    """--veg: hand the program to the native वेगः engine (Rust).
+
+    One command, two engines. The reference engine (this file) is the
+    specification; वेगः is the fast native implementation. Both must produce
+    identical output — तुल्यता.py is what enforces that.
+    """
+    import subprocess
+    here = os.path.dirname(os.path.abspath(__file__))
+    engine_dir = os.path.join(here, "rust-engine")
+    exe = "sanskrita-veg" + (".exe" if os.name == "nt" else "")
+    binary = os.path.join(engine_dir, "target", "release", exe)
+    if not os.path.exists(binary):
+        if not os.path.isdir(engine_dir):
+            print("वेगः-इञ्जिनं न प्राप्तम् — clone the repo to get rust-engine/",
+                  file=sys.stderr)
+            return 1
+        print("वेगः निर्मीयते… (cargo build --release, प्रथमवारं विलम्बः)",
+              file=sys.stderr)
+        built = subprocess.run(["cargo", "build", "--release"], cwd=engine_dir)
+        if built.returncode != 0 or not os.path.exists(binary):
+            print("वेगः न निर्मितम् — Rust आवश्यकम् (https://rustup.rs)",
+                  file=sys.stderr)
+            return 1
+    return subprocess.run([binary] + argv).returncode
+
+
 def main(argv):
     if "--version" in argv:
         print(f"संस्कृता (Sanskrita) v{VERSION} — फलम्")
@@ -1808,9 +2385,13 @@ def main(argv):
         spec.loader.exec_module(druta)
         sys.argv = ["द्रुतम्"] + [a for a in argv if a != "--druta"]
         return druta.main()
+    if "--veg" in argv:                        # native वेगः engine (Rust)
+        return run_with_veg([a for a in argv if a != "--veg"])
     roman = "--roman" in argv
     convert = "--convert" in argv
     args = [a for a in argv if not a.startswith("--")]
+    global PROGRAM_ARGS
+    PROGRAM_ARGS = args[1:]                    # everything after the program path
     interp = Interpreter(roman=roman)
     if not args:
         repl(interp)

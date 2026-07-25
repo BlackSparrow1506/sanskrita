@@ -11,6 +11,10 @@ use crate::token::{Tok, Token};
 /// Pāṇini's six kārakas — the only valid argument role labels.
 const KARAKAS: &[&str] = &["कर्ता", "कर्म", "करण", "सम्प्रदान", "अपादान", "अधिकरण"];
 
+/// The only names accepted after `:` in a declaration (matches the reference).
+const TYPE_NAMES: &[&str] = &["पूर्णाङ्कः", "दशमांशः", "द्रुतदशमांशः", "वाक्यम्",
+                              "सत्यासत्यम्", "सूची", "कोशः"];
+
 pub struct Parser {
     toks: Vec<Token>,
     pos: usize,
@@ -115,15 +119,30 @@ impl Parser {
             let is_const = self.is_kw("ध्रुव");
             self.advance();
             let name = self.ident("नाम अपेक्षितम् / expected a name")?;
+            // शून्यम्-safety opt-in: `मानय नाम? : वाक्यम् = शून्यम्।`
+            let mut nullable = false;
+            if self.is_op("?") {
+                self.advance();
+                nullable = true;
+            }
             // optional type annotation: `मानय क : पूर्णाङ्कः = ५।`
+            let mut ty = None;
             if self.is_op(":") {
                 self.advance();
-                let _ty = self.ident("प्रकारः अपेक्षितः / expected a type name")?;
+                let tline = self.line();
+                let t = self.ident("प्रकारः अपेक्षितः / expected a type name")?;
+                if !TYPE_NAMES.contains(&t.as_str()) {
+                    return Err(format!(
+                        "दोषः पङ्क्तौ {} — अज्ञातः प्रकारः '{}' — प्रकाराः: {}\n\
+                         Error at line {} — unknown type '{}' — types are: {}",
+                        tline, t, TYPE_NAMES.join(", "), tline, t, TYPE_NAMES.join(", ")));
+                }
+                ty = Some(t);
             }
             self.eat_op("=")?;
             let expr = self.expression()?;
             self.eat_end()?;
-            return Ok(Stmt::Let { name, expr, is_const, line });
+            return Ok(Stmt::Let { name, expr, is_const, ty, nullable, line });
         }
         if self.is_kw("विरम") {
             self.advance();
@@ -164,6 +183,12 @@ impl Parser {
             self.eat_op(")")?;
             let catch = self.block()?;
             return Ok(Stmt::Try { body, err_name, catch, line });
+        }
+        if self.is_kw("क्षिप") {
+            self.advance();
+            let expr = self.expression()?;
+            self.eat_end()?;
+            return Ok(Stmt::Throw { expr, line });
         }
         if self.is_kw("आनय") {
             self.advance();
@@ -271,16 +296,23 @@ impl Parser {
     fn param(&mut self) -> PResult<Param> {
         let line = self.line();
         let first = self.ident("मापदण्डनाम अपेक्षितम् / expected a parameter name")?;
+        let mut karaka = None;
+        let mut name = first;
         if matches!(self.peek().tok, Tok::Id(_)) {
-            if !KARAKAS.contains(&first.as_str()) {
+            if !KARAKAS.contains(&name.as_str()) {
                 return Err(format!(
                     "दोषः पङ्क्तौ {} — '{}' कारकं न — कारकाणि: कर्ता, कर्म, करण, सम्प्रदान, अपादान, अधिकरण\n\
-                     Error at line {} — '{}' is not a kāraka role", line, first, line, first));
+                     Error at line {} — '{}' is not a kāraka role", line, name, line, name));
             }
-            let name = self.ident("मापदण्डनाम अपेक्षितम्")?;
-            return Ok(Param { karaka: Some(first), name });
+            karaka = Some(name);
+            name = self.ident("मापदण्डनाम अपेक्षितम्")?;
         }
-        Ok(Param { karaka: None, name: first })
+        let mut default = None;
+        if self.is_op("=") {
+            self.advance();
+            default = Some(self.expression()?);
+        }
+        Ok(Param { karaka, name, default })
     }
 
     /// Argument: `मूल्यम्` or `कर्म: मूल्यम्` (kāraka-labeled).

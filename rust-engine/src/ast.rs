@@ -6,6 +6,10 @@
 pub struct Param {
     pub karaka: Option<String>,
     pub name: String,
+    /// §2b — default value. The EXPRESSION is stored, never a shared value, so
+    /// it is evaluated fresh on every call: Python's mutable-default bug
+    /// (`def f(x=[])`) cannot happen here.
+    pub default: Option<Expr>,
 }
 
 /// A call argument: optional kāraka label + value.
@@ -64,7 +68,8 @@ pub struct Method {
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub enum Stmt {
-    Let { name: String, expr: Expr, is_const: bool, line: usize },
+    Let { name: String, expr: Expr, is_const: bool,
+          ty: Option<String>, nullable: bool, line: usize },
     Assign { target: Target, expr: Expr, line: usize },
     ExprStmt(Expr),
     If { branches: Vec<(Expr, Vec<Stmt>)>, else_body: Option<Vec<Stmt>>, line: usize },
@@ -78,6 +83,8 @@ pub enum Stmt {
     Try { body: Vec<Stmt>, err_name: String, catch: Vec<Stmt>, line: usize },
     /// `आनय "संस्कृतम्" इति सं।` — native module or the user's own .सं file
     Import { module: String, alias: String, line: usize },
+    /// `क्षिप "सन्देशः"।` — raise an error the program can catch
+    Throw { expr: Expr, line: usize },
     Return { expr: Option<Expr>, line: usize },
     Break(usize),
     Continue(usize),

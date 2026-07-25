@@ -1,4 +1,65 @@
-# वेगः — audit of slices 1–3
+# वेगः — audit log
+
+*Newest section first. §1 is the Phase-3 completion audit; §2 is the
+original slice 1–3 audit that established the method.*
+
+---
+
+# 1. Phase-3 completion audit (v0.4.0, 25 July 2026)
+
+Method, unchanged from slice 3: read the design document promise by promise,
+read the Rust against the Python reference, and encode every finding as a test
+before calling anything done.
+
+## What was audited
+
+Every commitment in the design document for Phases 1–3 — §2b (the Python/Java
+flaws), §6 (standard library), §7d (what Sanskrit itself gives us), §8 (Phase 3
+deliverables), and the §10 risk register. The full promise-by-promise verdict is
+in `../STATUS.md`; this section records only what the audit *found wrong*.
+
+## Issues found and fixed
+
+| # | Severity | Issue | Fix |
+|---|---|---|---|
+| 8 | **High** | `to_sk()` in the reference engine did not recognise `Decimal`, so every number coming back from a native module was wrapped as an opaque `python-वस्तु`. `जेसन.विश्लेषय("{\"x\": 0.1}")["x"] + ०.२` raised "expected numbers" — the exact-decimal promise silently broke at the module boundary. | `to_sk` now returns `Decimal` unchanged. Regression test + differential case added. |
+| 9 | **High** | §2b promised annotations "checked *before* the program runs"; both engines checked them at execution time, so a program could print output and *then* fail on a provable type error. | New `precheck.rs` / `precheck()` pass in both engines. Provable problems are reported together and nothing executes. Deliberately conservative — it reports only what it can prove. |
+| 10 | Medium | §2b promised frozen default arguments; the language had **no default arguments at all**, so the promise was vacuous. | `Param.default` stores the *expression*, evaluated fresh in the callee's scope on every call. Python's mutable-default bug is structurally impossible. Tests in both engines. |
+| 11 | Medium | §7d #2 promised sandhi-style composition (`सूची.क्रमय().विपर्यय()`); attribute access on built-in types was a hard error. | Method tables in `stdlib.rs` + `Value::BoundNative`. `.नाम` resolves to the same stdlib function with the receiver first — one implementation, two spellings. |
+| 12 | Medium | §2b promised `द्रुतदशमांशः` as the explicit fast path; it did not exist, so "exact by default" had no counterpart to be default *over*. | `Value::Flt` + the `द्रुतदशमांशः()` builtin in both engines, contagious through arithmetic, printed exactly as IEEE-754 holds it. `fmt_f64` reproduces Python's `repr(float)`; verified against 12,000 random values. |
+| 13 | Low | वेगः accepted any identifier as a type name after `:`; the reference rejects unknown types. Silent divergence. | The Rust parser now validates against the same seven type names. |
+| 14 | Low | `प्रकारः(instance)` returned `वस्तु` in वेगः and the class name in the reference. | वेगः now returns the class name. Divergence closed rather than documented. |
+| 15a | **High** | `सूचीकर्म` and `जेसन` in the reference engine ran their arguments through `to_py`, which turns a `Decimal` into a **float**. `सू.योगः([०.१, ०.२])` answered `०.३०००००००००००००००४`, `सू.अद्वितीयम्([०.१०, ०.१])` lost the scale, and `ज.पाठय({"क": ०.१०})` wrote `0.10` as `0.1`. The language's headline promise was false at the library boundary. | New `RawFn` marker: native functions that touch numbers receive संस्कृता values untouched. सूचीकर्म rewritten on exact values; जेसन hand-written on both sides (`parse_float=Decimal` in, digit-preserving writer out). वेगः gained exponent expansion (`1e5` → `100000`) so JSON exponents stay exact there too. Four conformance cases + four differential cases added. |
+| 15 | Low | 62 MB of `rust-engine/target/` build artefacts were tracked in git despite a `.gitignore` rule added later; `build/` and `*.egg-info/` too. | `git rm -r --cached`, `.gitignore` extended. Repo drops from 825 to 211 tracked files. |
+
+## Not fixed — recorded instead
+
+| Item | Why |
+|---|---|
+| Paṇḍit review of every keyword (risk #12) | An external review, not a code change. Budgeted before v1.0; `docs/शब्दकोशः.md` now gives the reviewer a single document to mark up, with each term's derivation stated. |
+| `आनय "python:…"` in वेगः | Intentional. The bridge is a bootstrap, not a foundation (risk #21). वेगः reports a clear bilingual error naming the engine to use. |
+| Whole-program type inference | Phase 4. `प्राक्परीक्षा` proves what it can from the source; the runtime check still stands behind it. Claiming more would be dishonest. |
+
+## Quality gates after this audit
+
+- `cargo test` — 104 unit tests across lexer, NFC, bignum, decimal, precheck, evaluator, stdlib
+- `तुल्यता.py` — differential harness: 68 programs byte-identical, 15 must fail
+  in both, 20 whole example programs diffed
+- `परीक्षा.py` — 67 micro-tests + 14 error cases + every example + converter sync
+- CI runs `cargo test`, `clippy`, `fmt`, `परीक्षा.py` and the differential
+  harness on every push
+
+## Honest status
+
+The language is **feature-complete for Phases 1–3** and defended at three levels
+(unit, differential, conformance). What that does *not* mean: it has not been run
+in production by anyone, the standard library is small next to Python's, and the
+AI/ML, WASM, mobile and bare-metal stories are Phase 4–6 work that has not
+started. `../STATUS.md` states the boundary explicitly so nobody has to infer it.
+
+---
+
+# 2. Audit of slices 1–3
 
 Reviewed before beginning slice 4. Method: read the Rust against the Python
 reference line by line, hunt for semantic divergence, then encode every finding

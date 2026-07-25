@@ -31,6 +31,7 @@ fn alias(word: &str) -> &str {
         "prayata" | "prayat" => "प्रयत",
         "doshe" => "दोषे",
         "aanaya" | "anaya" => "आनय",
+        "kshipa" | "kship" => "क्षिप",
         "vada" | "vad" => "वद",
         // kāraka role labels
         "kartaa" | "karta" => "कर्ता",
@@ -57,7 +58,7 @@ fn alias(word: &str) -> &str {
 const KEYWORDS: &[&str] = &[
     "मानय", "ध्रुव", "यदि", "अथ", "अन्यथा", "यावत्", "सत्यम्", "असत्यम्",
     "शून्यम्", "च", "वा", "न", "विरम", "अनुवर्त", "विधि", "फलम्",
-    "प्रत्येकम्", "इति", "वर्गः", "सृज", "अयम्", "प्रयत", "दोषे", "आनय",
+    "प्रत्येकम्", "इति", "वर्गः", "सृज", "अयम्", "प्रयत", "दोषे", "आनय", "क्षिप",
 ];
 
 fn dev_digit(c: char) -> Option<i64> {
@@ -179,7 +180,7 @@ pub fn lex(src: &str) -> Result<Vec<Token>, String> {
                         continue;
                     }
                 }
-                if "+-*/%<>=(){}[],:.".contains(c) {
+                if "+-*/%<>=(){}[],:.?".contains(c) {
                     out.push(Token::new(Tok::Op(c.to_string()), line));
                     i += 1;
                     continue;
