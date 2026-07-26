@@ -147,6 +147,65 @@ When your programs grow, split them! Put helper विधिs in one file and im
 
 That's how real projects are built — libraries of your own, in Sanskrit. Text work? `आनय "वाक्यकर्म" इति वा।` gives split/join/find/replace.
 
+## Bonus 2 — five things that arrived in v0.4
+
+You have the whole language now. These five are worth ten minutes each.
+
+**1. Chain your operations, the way Sanskrit compounds words.**
+`.नाम` on a सूची, वाक्यम् or कोशः is the same stdlib function with the value in
+front — so you can read a pipeline left to right:
+
+```
+मानय अङ्काः = [७, ३, ९, ३, १]।
+वद(अङ्काः.अद्वितीयम्().क्रमय().विपर्यय())।        # [९, ७, ३, १]
+वद(अङ्काः.छानय(विधि(क) { फलम् क > ३। }).योगः())।  # १६
+वद("  अ, ब, स  ".परिष्कार().विभज(", ").दैर्घ्यम्())।  # ३
+```
+
+**2. Give a parameter a default, and stop repeating yourself.**
+
+```
+विधि अभिवादय(कर्म नाम, करण भाषा = "संस्कृतम्") { वद(नाम, "—", भाषा)। }
+अभिवादय(कर्म: "गौरी")।              # गौरी — संस्कृतम्
+अभिवादय(कर्म: "गौरी", करण: "हिन्दी")।  # गौरी — हिन्दी
+```
+
+The default is an *expression*, evaluated fresh each call — so `स = []` as a
+default gives you a **new** empty list every time, not one shared list. (If you
+have written Python, you know exactly which bug this removes.)
+
+**3. Raise your own error with `क्षिप`, and catch it as usual.**
+
+```
+विधि भागः(क, ख) {
+    यदि (ख == ०) { क्षिप "शून्येन भागः न शक्यः"। }
+    फलम् क / ख।
+}
+प्रयत { वद(भागः(१०, ०))। } दोषे (त्रु) { वद("गृहीतम्:", त्रु)। }
+```
+
+**4. Say when a value may be missing — and only then.**
+
+```
+मानय नाम : वाक्यम् = "गौरी"।
+मानय उपनाम? : वाक्यम् = शून्यम्।     # the '?' is the permission
+# मानय अन्यत् : वाक्यम् = शून्यम्।   # this is refused BEFORE the program runs
+```
+
+**5. Read and write files, and speak JSON.**
+
+```
+आनय "सञ्चिका" इति स।
+आनय "जेसन" इति ज।
+
+स.लिख("छात्राः.json", ज.पाठय({"नाम": "आर्या", "अङ्काः": [८८, ९२]}))।
+मानय क = ज.विश्लेषय(स.पठ("छात्राः.json"))।
+वद(क["नाम"], क["अङ्काः"].योगः())।
+```
+
+A decimal read from JSON stays an exact दशमांशः — it never passes through a
+float — so money read from a file is still exactly the money you wrote.
+
 ## ११ — the eleventh program is publishing your ten
 
 You are now a संस्कृता programmer. Complete the circle:

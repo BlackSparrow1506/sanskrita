@@ -1,0 +1,51 @@
+name: शब्दसंशोधनम् / Terminology correction
+description: A Sanskrit term in the language or docs is wrong, ambiguous, or needlessly obscure
+labels: ["terminology"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This is one of the most valuable kinds of contribution. The glossary
+        exists precisely so that terms can be argued with — see
+        [docs/शब्दकोशः.md](../../docs/शब्दकोशः.md).
+
+        A formal paṇḍit review is budgeted before v1.0; these issues feed it.
+
+  - type: input
+    id: current
+    attributes:
+      label: The current term
+      placeholder: "न्यूनीकरण"
+    validations:
+      required: true
+
+  - type: input
+    id: where
+    attributes:
+      label: Where it appears
+      placeholder: "सूचीकर्म module; docs/शब्दकोशः.md §5"
+    validations:
+      required: true
+
+  - type: input
+    id: proposed
+    attributes:
+      label: Your proposed term
+    validations:
+      required: true
+
+  - type: textarea
+    id: derivation
+    attributes:
+      label: Derivation or attestation
+      description: Root + affix, or where it is attested classically.
+    validations:
+      required: true
+
+  - type: textarea
+    id: why
+    attributes:
+      label: Why the current term is wrong
+      description: One or two sentences is plenty.
+    validations:
+      required: true

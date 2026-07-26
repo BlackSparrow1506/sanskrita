@@ -1,0 +1,13 @@
+narration: MISSING — rendering silent preview
+Traceback (most recent call last):
+  File "/sessions/bold-nifty-davinci/mnt/Sanskrit language development/संस्कृता/video/gen_v10_chandas.py", line 339, in <module>
+    main()
+  File "/sessions/bold-nifty-davinci/mnt/Sanskrit language development/संस्कृता/video/gen_v10_chandas.py", line 295, in main
+    shutil.rmtree(FRAME_DIR)
+  File "/usr/lib/python3.10/shutil.py", line 725, in rmtree
+    _rmtree_safe_fd(fd, path, onerror)
+  File "/usr/lib/python3.10/shutil.py", line 681, in _rmtree_safe_fd
+    onerror(os.unlink, fullname, sys.exc_info())
+  File "/usr/lib/python3.10/shutil.py", line 679, in _rmtree_safe_fd
+    os.unlink(entry.name, dir_fd=topfd)
+PermissionError: [Errno 1] Operation not permitted: 'f00289.png'

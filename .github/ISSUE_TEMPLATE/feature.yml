@@ -1,0 +1,52 @@
+name: प्रस्तावः / Feature proposal
+description: Propose a language feature, a library function, or a tool
+labels: ["proposal"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Proposals are welcome. Two things make them much easier to accept:
+        a **real program** you cannot write today, and a **Sanskrit name with
+        its derivation** (see [docs/शब्दकोशः.md](../../docs/शब्दकोशः.md)).
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What can't you do today?
+      description: Show the program you want to write, or the workaround you're stuck with.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you propose
+      description: Syntax or API, with a worked example.
+      render: text
+    validations:
+      required: true
+
+  - type: input
+    id: naming
+    attributes:
+      label: Proposed Sanskrit name and its derivation
+      description: "Root + affix, or a classical attestation. e.g. छानय — √छन् (to sift) → filter"
+
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What kind of change is this?
+      options:
+        - Standard library function or module
+        - Language syntax or semantics (breaking)
+        - Language syntax or semantics (additive)
+        - Tooling — CLI, editor, playground
+        - Documentation
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered
+      description: Including "do nothing" — why isn't the current way good enough?

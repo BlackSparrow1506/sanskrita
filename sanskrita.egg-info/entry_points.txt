@@ -1,3 +1,0 @@
-[console_scripts]
-sanskrita = sanskrita:console
-sanskrita-playground = playground:main

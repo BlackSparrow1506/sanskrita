@@ -1,0 +1,255 @@
+// value.rs — runtime values (वेगः engine), slices 1–6.
+//
+// Lists, maps and objects are shared and mutable, so they live behind
+// Rc<RefCell<…>> — assigning a सूची to another name refers to the SAME list,
+// exactly as in the Python reference.
+
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::rc::Rc;
+
+use crate::ast::{Param, Stmt};
+use crate::bigint::BigInt;
+use crate::decimal::Decimal;
+
+#[derive(Clone)]
+pub struct Function {
+    pub name: String,
+    pub params: Vec<Param>,
+    pub body: Vec<Stmt>,
+    /// The scope this विधि was DEFINED in — what makes it a closure. A call
+    /// runs inside a fresh scope whose parent is this one, so the function can
+    /// still see the variables that surrounded it when it was created.
+    pub env: crate::interp::ScopeRef,
+}
+
+// Scopes contain Values which contain Functions, so deriving Debug would
+// recurse forever on a closure that captured itself.
+impl std::fmt::Debug for Function {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Function({}, {} params)", self.name, self.params.len())
+    }
+}
+
+#[derive(Debug)]
+pub struct Class {
+    pub name: String,
+    pub parent: Option<Rc<Class>>,
+    pub methods: HashMap<String, Rc<Function>>,
+}
+
+impl Class {
+    /// Look a method up through the inheritance chain.
+    pub fn find_method(&self, name: &str) -> Option<Rc<Function>> {
+        if let Some(m) = self.methods.get(name) {
+            return Some(m.clone());
+        }
+        match &self.parent {
+            Some(p) => p.find_method(name),
+            None => None,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct Instance {
+    pub class: Rc<Class>,
+    pub fields: RefCell<HashMap<String, Value>>,
+}
+
+/// Map keys: text or whole numbers (matching the reference).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum Key {
+    Str(String),
+    Int(String), // canonical decimal digits of the integer
+}
+
+#[derive(Debug, Clone)]
+pub enum Value {
+    /// पूर्णाङ्कः — arbitrary-precision integer
+    Int(BigInt),
+    /// दशमांशः — exact decimal
+    Dec(Decimal),
+    /// द्रुतदशमांशः — IEEE-754 binary float. §2b: the fast path is OPT-IN.
+    /// You must ask for it by name, and the name says what you are trading:
+    /// द्रुत (fast), not शुद्ध (exact).
+    Flt(f64),
+    Str(String),
+    Bool(bool),
+    Nil,
+    Func(Rc<Function>),
+    /// सूची — shared, mutable list
+    List(Rc<RefCell<Vec<Value>>>),
+    /// कोशः — shared, mutable map (insertion-ordered like the reference's dict)
+    Map(Rc<RefCell<MapData>>),
+    Class(Rc<Class>),
+    Object(Rc<Instance>),
+    /// A method bound to its object: `वस्तु.विधि`
+    Bound(Rc<Instance>, Rc<Function>),
+    /// A native stdlib module (संस्कृतम्, गणितम्, …) — `सं.छन्दः(…)`
+    Module(&'static str),
+    /// A native module function, already resolved: `सं.छन्दः`
+    Native(&'static str, &'static str),
+    /// A user's own .सं file imported as a namespace
+    UserModule(Rc<RefCell<HashMap<String, Value>>>, String),
+    /// दोषः — the value bound by `दोषे (त्रु)`. Prints as its Sanskrit message,
+    /// but answers .सन्देशः .आङ्ग्लसन्देशः .पङ्क्तिः .प्रकारः .अनुरेखा and can be
+    /// re-raised unchanged with `क्षिप त्रु।`.
+    Err(Rc<crate::err::SError>),
+    /// §7d #2 — a stdlib function or builtin with its receiver already bound:
+    /// `सूची.क्रमय`. The module is None for builtins (क्रमय, दैर्घ्यम्, …).
+    BoundNative(Box<Value>, Option<&'static str>, &'static str),
+}
+
+/// Insertion-ordered map: Python dicts preserve insertion order, and our
+/// कुञ्जिकाः() output must match, so we keep the order explicitly.
+#[derive(Debug, Default)]
+pub struct MapData {
+    pub order: Vec<Key>,
+    pub items: HashMap<Key, Value>,
+}
+
+impl MapData {
+    pub fn get(&self, k: &Key) -> Option<&Value> {
+        self.items.get(k)
+    }
+
+    pub fn insert(&mut self, k: Key, v: Value) {
+        if !self.items.contains_key(&k) {
+            self.order.push(k.clone());
+        }
+        self.items.insert(k, v);
+    }
+
+    pub fn remove(&mut self, k: &Key) -> Option<Value> {
+        if let Some(v) = self.items.remove(k) {
+            self.order.retain(|o| o != k);
+            Some(v)
+        } else {
+            None
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        self.items.len()
+    }
+}
+
+impl Value {
+    pub fn int(v: i64) -> Value {
+        Value::Int(BigInt::from_i64(v))
+    }
+
+    pub fn list(items: Vec<Value>) -> Value {
+        Value::List(Rc::new(RefCell::new(items)))
+    }
+
+    pub fn map(data: MapData) -> Value {
+        Value::Map(Rc::new(RefCell::new(data)))
+    }
+
+    /// Numeric view for arithmetic: integers promote to decimals when mixed.
+    pub fn as_decimal(&self) -> Option<Decimal> {
+        match self {
+            Value::Int(b) => Some(Decimal::from_bigint(b.clone())),
+            Value::Dec(d) => Some(d.clone()),
+            _ => None,
+        }
+    }
+
+    pub fn is_number(&self) -> bool {
+        matches!(self, Value::Int(_) | Value::Dec(_))
+    }
+
+    /// Any numeric value, exact or fast.
+    pub fn is_numeric(&self) -> bool {
+        matches!(self, Value::Int(_) | Value::Dec(_) | Value::Flt(_))
+    }
+
+    /// Binary-float view — only for द्रुतदशमांशः arithmetic.
+    pub fn as_f64(&self) -> Option<f64> {
+        match self {
+            Value::Flt(f) => Some(*f),
+            Value::Int(_) | Value::Dec(_) =>
+                self.as_decimal().and_then(|d| d.to_plain_string().parse::<f64>().ok()),
+            _ => None,
+        }
+    }
+
+    /// Convert to a map key (text or whole number only).
+    pub fn as_key(&self) -> Option<Key> {
+        match self {
+            Value::Str(s) => Some(Key::Str(s.clone())),
+            Value::Int(b) => Some(Key::Int(b.to_string_signed())),
+            _ => None,
+        }
+    }
+
+    pub fn type_name(&self) -> &'static str {
+        match self {
+            Value::Int(_) => "पूर्णाङ्कः",
+            Value::Dec(_) => "दशमांशः",
+            Value::Flt(_) => "द्रुतदशमांशः",
+            Value::Str(_) => "वाक्यम्",
+            Value::Bool(_) => "सत्यासत्यम्",
+            Value::Nil => "शून्यम्",
+            Value::Func(_) | Value::Bound(..) | Value::Native(..)
+                | Value::BoundNative(..) => "विधिः",
+            Value::List(_) => "सूची",
+            Value::Map(_) => "कोशः",
+            Value::Class(_) => "वर्गः",
+            Value::Object(_) => "वस्तु",
+            Value::Module(_) | Value::UserModule(..) => "कोष्ठकम्",
+            Value::Err(_) => "दोषः",
+        }
+    }
+}
+
+impl PartialEq for Value {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            _ if self.is_number() && other.is_number() => {
+                match (self.as_decimal(), other.as_decimal()) {
+                    (Some(a), Some(b)) => a.eq_value(&b),
+                    _ => false,
+                }
+            }
+            (Value::Flt(a), Value::Flt(b)) => a == b,
+            (Value::Flt(_), _) | (_, Value::Flt(_)) => {
+                match (self.as_f64(), other.as_f64()) {
+                    (Some(x), Some(y)) => x == y,
+                    _ => false,
+                }
+            }
+            (Value::Str(a), Value::Str(b)) => a == b,
+            (Value::Bool(a), Value::Bool(b)) => a == b,
+            (Value::Nil, Value::Nil) => true,
+            (Value::Func(a), Value::Func(b)) => Rc::ptr_eq(a, b),
+            (Value::List(a), Value::List(b)) => {
+                if Rc::ptr_eq(a, b) {
+                    return true;
+                }
+                let (a, b) = (a.borrow(), b.borrow());
+                a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| x == y)
+            }
+            (Value::Map(a), Value::Map(b)) => {
+                if Rc::ptr_eq(a, b) {
+                    return true;
+                }
+                let (a, b) = (a.borrow(), b.borrow());
+                a.len() == b.len()
+                    && a.order.iter().all(|k| match (a.get(k), b.get(k)) {
+                        (Some(x), Some(y)) => x == y,
+                        _ => false,
+                    })
+            }
+            (Value::Class(a), Value::Class(b)) => Rc::ptr_eq(a, b),
+            (Value::Object(a), Value::Object(b)) => Rc::ptr_eq(a, b),
+            (Value::Module(a), Value::Module(b)) => a == b,
+            (Value::Native(m1, f1), Value::Native(m2, f2)) => m1 == m2 && f1 == f2,
+            (Value::UserModule(a, _), Value::UserModule(b, _)) => Rc::ptr_eq(a, b),
+            (Value::Err(a), Value::Err(b)) => a.sa == b.sa && a.line == b.line,
+            _ => false,
+        }
+    }
+}

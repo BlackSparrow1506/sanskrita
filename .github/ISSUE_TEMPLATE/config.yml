@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: सुरक्षा / Security vulnerability
+    url: https://github.com/BlackSparrow1506/sanskrita/blob/main/SECURITY.md
+    about: Do not open a public issue. Read SECURITY.md and email instead.
+  - name: प्रश्नः / Question about using संस्कृता
+    url: https://github.com/BlackSparrow1506/sanskrita/discussions
+    about: Ask in Discussions — docs/TUTORIAL.md and docs/AI-SPEC.md may answer it first.

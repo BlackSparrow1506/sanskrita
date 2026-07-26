@@ -1,5 +1,8 @@
 __pycache__/
 *.pyc
+build/
+dist/
+*.egg-info/
 .DS_Store
 अभिलेखः.txt
 
@@ -11,3 +14,6 @@ video/*.mp3
 video/*.aiff
 video/*.wav
 video/voice_used.txt
+
+# rust build artifacts
+rust-engine/target/

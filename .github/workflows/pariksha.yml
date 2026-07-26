@@ -8,6 +8,9 @@ on:
 jobs:
   pariksha:
     runs-on: ubuntu-latest
+    # A hung job is worse than a failed one: it burns the runner and tells you
+    # nothing. Nothing here should take more than a couple of minutes.
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -18,3 +21,37 @@ jobs:
           node-version: "20"
       - name: Run the suite
         run: python3 परीक्षा.py
+      - name: Property-based test (reference engine)
+        timeout-minutes: 5
+        run: python3 यादृच्छिकपरीक्षा.py --count 400 --seed 1 --only-reference
+             --budget 180
+
+  vegah:
+    name: वेगः (Rust engine)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: cargo fmt check
+        run: cargo fmt --check
+        working-directory: rust-engine
+        continue-on-error: true
+      - name: cargo clippy
+        run: cargo clippy -- -D warnings
+        working-directory: rust-engine
+        continue-on-error: true
+      - name: cargo test
+        run: cargo test
+        working-directory: rust-engine
+      - name: differential test vs Python reference
+        run: python3 तुल्यता.py
+      - name: property-based differential test (random programs, both engines)
+        timeout-minutes: 8
+        run: python3 यादृच्छिकपरीक्षा.py --count 400 --seed 1 --budget 300
+      - name: benchmarks regenerate cleanly (§7c)
+        timeout-minutes: 5
+        run: python3 मापनम्.py --repeat 1 --dry-run > /dev/null
