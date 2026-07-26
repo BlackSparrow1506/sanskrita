@@ -13,6 +13,14 @@ them is listed under **Breaking** below.
 
 ### Fixed
 
+- **The property tester could hang CI, and did — for 13 hours.** Its generator
+  could emit `स = स + (स * स)` inside a loop, squaring the accumulator every
+  iteration until the number had ~98,000 digits. Both engines computed it
+  correctly; वेगः's schoolbook bignum multiply simply took hours. Three fixes:
+  the accumulator is excluded from its own update expression, both engines now
+  run as subprocesses with a per-program timeout and the run has a wall-clock
+  `--budget`, and every CI job and step has a `timeout-minutes`. A hung job is
+  worse than a failed one — it burns the runner and tells you nothing.
 - **वेगः had no closures.** A विधि defined inside another विधि could not see
   the enclosing variables: every call ran parented to the globals. The reference
   engine has had proper lexical closures since v0.2. वेगः now links scopes the

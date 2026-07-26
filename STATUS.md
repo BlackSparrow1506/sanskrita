@@ -122,6 +122,17 @@ whose toolchain is absent are written in as *not measured*, naming what is
 missing; nothing is estimated. Regenerate with `python3 मापनम्.py --repeat 5`
 after `cargo build --release`, and §7c is satisfied.
 
+### A known performance limit in वेगः
+
+`bigint.rs` multiplies with the schoolbook O(n²) algorithm. It is exact and has
+no dependencies — which is what design §7c asked for — but CPython's `int`
+switches to Karatsuba for large operands and वेगः does not. Below a few thousand
+digits the difference is invisible; at ~100,000 digits वेगः becomes dramatically
+slower than the reference engine it exists to replace. Found when a generated
+test program squared an accumulator twelve times and hung CI for 13 hours.
+
+Both engines were *correct*. Karatsuba is the fix, and it is not yet written.
+
 ## 6. Deferred by design — and to which phase
 
 These were never Phase-3 promises. They are listed so the roadmap boundary is
@@ -129,6 +140,7 @@ explicit rather than implied.
 
 | Item | Phase | Note |
 |---|---|---|
+| Karatsuba multiplication in वेगः | 4 | schoolbook O(n²) today; matters above a few thousand digits (see above) |
 | Bytecode VM + JIT | 4 | the Java/Python road; वेगः is the prerequisite |
 | WASM compiler (browser) | 4 | today: the JS playground |
 | Native AI/ML library | 3–4 | today: NumPy/pandas/scikit-learn through the bridge |

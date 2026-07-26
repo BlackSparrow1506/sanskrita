@@ -30,14 +30,11 @@ fifty.
 """
 
 import argparse
-import io
 import os
 import random
 import subprocess
 import sys
-from contextlib import redirect_stdout
-
-import sanskrita
+import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 VEG = os.path.join(HERE, "rust-engine", "target", "release", "sanskrita-veg")
@@ -69,9 +66,9 @@ class Gen:
 
     # ---- expressions
 
-    def number(self):
+    def number(self, small=False):
         r = self.rng.random()
-        if r < 0.15:                      # beyond i64 — bignum territory
+        if r < 0.15 and not small:        # beyond i64 — bignum territory
             return dev(self.rng.randint(10**19, 10**24))
         if r < 0.35:                      # decimals, including trailing zeros
             whole = self.rng.randint(0, 999)
@@ -81,17 +78,29 @@ class Gen:
             return str(self.rng.randint(0, 999))
         return dev(self.rng.randint(0, 200))
 
-    def atom(self):
+    def atom(self, exclude=(), small=False):
+        usable = [n for n in self.scope if n not in exclude]
         r = self.rng.random()
-        if self.scope and r < 0.35:
-            return self.rng.choice(self.scope)
-        return self.number()
+        if usable and r < 0.35:
+            return self.rng.choice(usable)
+        return self.number(small)
 
-    def arith(self, depth=0):
+    def arith(self, depth=0, exclude=(), small=False):
+        """An arithmetic expression.
+
+        `exclude` keeps named variables out — used for a loop accumulator, and
+        it matters more than it looks. `स = स + (स * स)` squares the
+        accumulator every iteration: twelve rounds starting from १०²⁴ yields a
+        number with ~98,000 digits. Both engines compute it *correctly*; वेगः's
+        schoolbook bignum multiply then takes hours, and a CI job that never
+        finishes is worse than one that fails. Generated programs must be
+        provably quick, not merely provably valid.
+        """
         if depth >= 2 or self.rng.random() < 0.35:
-            return self.atom()
+            return self.atom(exclude, small)
         op = self.rng.choice(["+", "-", "*", "%", "/"])
-        a, b = self.arith(depth + 1), self.arith(depth + 1)
+        a = self.arith(depth + 1, exclude, small)
+        b = self.arith(depth + 1, exclude, small)
         if op in ("%", "/"):
             # keep it defined: division by zero is an error in both engines,
             # and we are hunting for *disagreement*, not for known errors
@@ -100,6 +109,11 @@ class Gen:
             # negative operands are where floored vs truncated % diverges
             return f"(०-{a}) {self.rng.choice(['%', '+', '*'])} {b}"
         return f"({a} {op} {b})"
+
+    def small_arith(self, exclude=()):
+        """A loop-body expression: no bignum literals, and the accumulator
+        cannot feed back into itself."""
+        return self.arith(0, exclude, True)
 
     def condition(self):
         op = self.rng.choice(["<", ">", "<=", ">=", "==", "!="])
@@ -136,7 +150,7 @@ class Gen:
             out.append(f"{indent}मानय _स = ०।")
             self.scope.append("_स")
             out.append(f"{indent}यावत् ({i} < {dev(self.rng.randint(1, 12))}) {{")
-            out.append(f"{indent}    _स = _स + {self.arith()}।")
+            out.append(f"{indent}    _स = _स + {self.small_arith(exclude=('_स', i))}।")
             out.append(f"{indent}    {i} = {i} + १।")
             out.append(f"{indent}}}")
             out.append(f"{indent}वद(_स)।")
@@ -162,26 +176,44 @@ class Gen:
 
 # ---------------------------------------------------------------- execution
 
-def run_reference(src):
-    buf = io.StringIO()
-    try:
-        with redirect_stdout(buf):
-            sanskrita.run_source(src, sanskrita.Interpreter())
-        return True, buf.getvalue(), None
-    except sanskrita.SanskritaError as err:
-        return False, buf.getvalue(), str(err)
-    except RecursionError:
-        return False, buf.getvalue(), "RecursionError"
-    except Exception as err:                       # a bug in the engine itself
-        return False, buf.getvalue(), f"CRASH {type(err).__name__}: {err}"
+# A property tester that can hang is worse than no property tester: it turns a
+# red build into a build that never finishes. BOTH engines therefore run as
+# subprocesses with a timeout, and the whole run has a wall-clock budget.
+#
+# Running the reference out-of-process costs a fork per program. That is the
+# price of never wedging CI again, and it buys something else too: a Python
+# traceback becomes visible as a crash instead of being caught as an exception.
+
+TIMEOUT = 15          # seconds per program, per engine
+_TMP = "/tmp/_yadrcchika.सं"
 
 
-def run_veg(src):
-    path = "/tmp/_yadrcchika.सं"
-    with open(path, "w", encoding="utf-8") as f:
+def _write(src):
+    with open(_TMP, "w", encoding="utf-8") as f:
         f.write(src)
+    return _TMP
+
+
+def run_reference(src, timeout=TIMEOUT):
+    path = _write(src)
     try:
-        r = subprocess.run([VEG, path], capture_output=True, timeout=20)
+        r = subprocess.run([sys.executable, os.path.join(HERE, "sanskrita.py"), path],
+                           capture_output=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return False, "", "TIMEOUT"
+    out = r.stdout.decode(errors="replace")
+    err = r.stderr.decode(errors="replace")
+    if r.returncode < 0:
+        return False, out, f"CRASH signal {-r.returncode}"
+    if "Traceback (most recent call last)" in err:
+        return False, out, f"CRASH {err.strip().splitlines()[-1][:160]}"
+    return r.returncode == 0, out, err.strip() or None
+
+
+def run_veg(src, timeout=TIMEOUT):
+    path = _write(src)
+    try:
+        r = subprocess.run([VEG, path], capture_output=True, timeout=timeout)
     except subprocess.TimeoutExpired:
         return False, "", "TIMEOUT"
     if r.returncode < 0:                           # killed by a signal
@@ -192,16 +224,22 @@ def run_veg(src):
     return r.returncode == 0, r.stdout.decode(errors="replace"), err.strip() or None
 
 
-def check(src, use_veg):
+def check(src, use_veg, timeout=TIMEOUT):
     """Return None if the program is fine, or a description of the problem."""
-    p_ok, p_out, p_err = run_reference(src)
+    p_ok, p_out, p_err = run_reference(src, timeout)
+    if p_err == "TIMEOUT":
+        return (f"the reference engine did not finish in {timeout}s — either the "
+                f"generator produced a non-terminating program (fix the "
+                f"generator) or the engine hangs on it (fix the engine)")
     if p_err and p_err.startswith("CRASH"):
         return f"reference engine crashed: {p_err}"
     if not use_veg:
         return None
-    v_ok, v_out, v_err = run_veg(src)
-    if v_err and (v_err.startswith("PANIC") or v_err.startswith("CRASH")
-                  or v_err == "TIMEOUT"):
+    v_ok, v_out, v_err = run_veg(src, timeout)
+    if v_err == "TIMEOUT":
+        return (f"वेगः did not finish in {timeout}s while the reference did — "
+                f"a hang in the native engine")
+    if v_err and (v_err.startswith("PANIC") or v_err.startswith("CRASH")):
         return f"वेगः {v_err}"
     if p_ok != v_ok:
         return (f"one engine succeeded and the other failed\n"
@@ -212,16 +250,27 @@ def check(src, use_veg):
     return None
 
 
-def shrink(src, use_veg, problem):
-    """Drop lines while the failure survives. A 4-line repro beats a 40-line one."""
+def shrink(src, use_veg, problem, budget=40):
+    """Drop lines while the failure survives. A 4-line repro beats a 40-line one.
+
+    `budget` caps how many candidate programs we are willing to run: shrinking a
+    TIMEOUT failure by re-running it forty times would take ten minutes, and the
+    smaller program is not worth that. Timeouts are reported unshrunk.
+    """
+    if "did not finish" in problem:
+        return src
     lines = src.splitlines()
+    spent = 0
     changed = True
-    while changed and len(lines) > 1:
+    while changed and len(lines) > 1 and spent < budget:
         changed = False
         for i in range(len(lines)):
+            if spent >= budget:
+                break
             if lines[i].strip() in ("}", "") or lines[i].rstrip().endswith("{"):
                 continue                            # never break block structure
             trial = "\n".join(lines[:i] + lines[i + 1:]) + "\n"
+            spent += 1
             if check(trial, use_veg) is not None:
                 lines = lines[:i] + lines[i + 1:]
                 changed = True
@@ -235,6 +284,11 @@ def main():
     ap.add_argument("--seed", type=int, default=None)
     ap.add_argument("--only-reference", action="store_true")
     ap.add_argument("--verbose", action="store_true")
+    ap.add_argument("--timeout", type=int, default=TIMEOUT,
+                    help="seconds allowed per program, per engine")
+    ap.add_argument("--budget", type=int, default=600,
+                    help="wall-clock seconds for the whole run; stops cleanly "
+                         "when spent, so CI can never hang")
     args = ap.parse_args()
 
     use_veg = not args.only_reference and os.path.exists(VEG)
@@ -247,11 +301,18 @@ def main():
           f"{'' if use_veg else ' (reference only)'}")
 
     failures = 0
+    started = time.time()
+    ran = 0
     for n in range(args.count):
+        if time.time() - started > args.budget:
+            print(f"\n  (budget of {args.budget}s spent after {ran} programs — "
+                  f"stopping cleanly)")
+            break
         seed = base_seed + n
         rng = random.Random(seed)
         src = Gen(rng).program(rng.randint(2, 8))
-        problem = check(src, use_veg)
+        ran += 1
+        problem = check(src, use_veg, args.timeout)
         if problem:
             failures += 1
             small = shrink(src, use_veg, problem)
@@ -267,10 +328,11 @@ def main():
         elif args.verbose:
             print(f"  ✓ seed {seed}")
 
+    elapsed = time.time() - started
     if failures:
-        print(f"\n{failures} failure(s) ✗")
+        print(f"\n{failures} failure(s) ✗   ({ran} programs, {elapsed:.0f}s)")
         return 1
-    print(f"\nसर्वं तुल्यम् ✓  ({args.count} random programs agreed)")
+    print(f"\nसर्वं तुल्यम् ✓  ({ran} random programs agreed in {elapsed:.0f}s)")
     return 0
 
 

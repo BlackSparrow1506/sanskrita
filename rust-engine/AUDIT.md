@@ -70,6 +70,33 @@ all but a missing feature nobody had noticed.
 | 21 | Medium | My first traceback implementation wrapped `call_function` in a thin outer function so it could append a frame on the way out. That cost **one native stack frame on every call** — and a tree-walker pays for every frame several times over. A 25-deep factorial went over the recursion guard. | Frames are appended only while *unwinding*, so the normal path costs nothing. |
 | 22 | Low | A first attempt at the traceback snapshotted the whole call stack at the innermost frame. That would have given a `प्रयत` sitting half-way up frames from *above* itself, which the reference does not do. Caught by reasoning about the semantics before shipping, not by a test. | Each विधि appends its own frame as the error escapes it — so a catch half-way up sees only what the error actually passed through. Differential case added. |
 
+## Found by a CI job that ran for 13 hours (v0.5.1)
+
+The property tester wedged GitHub Actions. Not slow — **stuck**, with no
+timeout anywhere to stop it.
+
+**Root cause, in the generator, not the engines.** Loop bodies were built as
+`स = स + <any expression>`, and that expression could reference the accumulator
+itself: `स = स + (स * स)` squares it every iteration. Twelve iterations starting
+from १०²⁴ produces a number with roughly **98,000 digits**. Both engines compute
+it *correctly* — that is the uncomfortable part — but वेगः's hand-written
+`BigInt` uses schoolbook O(n²) multiplication, so a single such multiply is on
+the order of 10⁸ limb operations, compounding each round. Python's `int` switches
+to Karatsuba above a threshold and shrugs it off; वेगः does not.
+
+| # | Severity | Issue | Fix |
+|---|---|---|---|
+| 27 | **High** | A generated program could grow super-exponentially, so CI hung for 13 hours. | The loop accumulator is now excluded from its own update expression, and loop bodies use small literals. Generated programs are provably quick, not merely provably valid. |
+| 28 | **High** | Nothing could stop a hang: the reference engine ran **in-process with no timeout**, and the run had no wall-clock limit. | Both engines now run as subprocesses with a per-program timeout (15s default); the whole run has a `--budget` (600s default) and stops cleanly when spent; `shrink()` is capped and skips timeout failures instead of re-running them forty times. Running the reference out-of-process also makes a Python traceback visible as a crash rather than something we catch. |
+| 29 | Medium | The workflow had no `timeout-minutes` on any job or step. | Added throughout: 10 minutes for the reference job, 20 for वेगः, and tighter per-step limits. A hung job now fails in minutes with a log. |
+
+**The honest performance note this exposed:** वेगः's bignum multiplication is
+schoolbook. It is exact and dependency-free, which is what §7c asked for, but it
+is asymptotically worse than CPython's. For numbers up to a few thousand digits
+this is invisible; at ~100,000 digits वेगः is dramatically slower than the
+reference engine it is supposed to replace. Karatsuba is the fix and is not yet
+written — recorded in `../STATUS.md` rather than discovered later by a user.
+
 ## Found by running `तुल्यता.py` on the real machine (v0.5.1)
 
 `cargo test` passed and the differential harness still reported **12
