@@ -1,6 +1,6 @@
 # GRAMMAR — the formal grammar of संस्कृता
 
-*व्याकरणम् · complete EBNF for v0.5.0*
+*व्याकरणम् · complete EBNF for v0.6.0*
 
 This is the normative grammar. Both engines implement it — `sanskrita.py`
 (reference) and `rust-engine/` (वेगः) — and `तुल्यता.py` checks that they agree.

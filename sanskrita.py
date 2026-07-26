@@ -38,7 +38,7 @@ from decimal import Decimal, localcontext
 
 sys.setrecursionlimit(4000)
 
-VERSION = "0.5.0"
+VERSION = "0.6.0"
 
 # arguments passed to the running program (आदेशचराः)
 PROGRAM_ARGS: list = []
@@ -1242,8 +1242,9 @@ def _make_ganitam():
 
         This is the commercial convention (₹२.५ → ₹३, ₹-२.५ → ₹-३), not
         banker's rounding, because that is what an invoice, a payslip and an
-        auditor expect. Division still uses half-even at 28 significant digits;
-        this function is the place where you say "and now make it money".
+        auditor expect. Division is exact when it divides evenly, and half-even
+        at 28 significant digits only when the quotient repeats; this function
+        is the place where you say "and now make it money".
 
         The result keeps exactly `स्थानानि` decimal places, so १०० becomes
         १००.०० — which is what you want in a printed total.

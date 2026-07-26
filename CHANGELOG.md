@@ -11,6 +11,39 @@ them is listed under **Breaking** below.
 
 ## [Unreleased]
 
+---
+
+## [0.6.0] — 2026-07-26 — "शुद्धिः" (correctness)
+
+One theme: division. Four bugs, three of them in arithmetic that had passed
+every hand-written test since slice 5, all found by the property tester within
+2,000 generated programs. Two of the four were in the **reference** engine —
+the one everything else is checked against.
+
+### Breaking
+
+Pre-1.0, a MINOR release may change behaviour; per `docs/STABILITY.md` every
+change is listed here with what to do about it.
+
+- **Division is now exact when it divides evenly, at any size.** It used to stop
+  at 28 significant digits. A quotient that terminates — anything whose divisor,
+  in lowest terms, is built only from 2s and 5s — now returns all of its digits.
+  `३०६५०९…/२२५` returns 55 digits where it previously returned 28 and then
+  zeros.
+  *Migration:* if you relied on division to bound the size of a number, round
+  explicitly: `ग.परिवृत्त(अ / ब, २)`. Repeating quotients are unchanged — still
+  28 significant digits, half-even.
+
+- **`-०` no longer exists.** `(०-७०) * ०` prints `०`, not `-०`. The scale is
+  kept, so `(०-१) * ०.००` is `०.००`.
+  *Migration:* none for arithmetic — `-०` and `०` always compared equal. Only
+  printed output changes. `द्रुतदशमांशः` still has IEEE `-०.०`.
+
+- **A division result never carries a positive exponent**, so a later
+  multiplication can no longer inherit one and silently drop decimal places.
+  A product that used to print with no decimals may now print with two.
+  *Migration:* none; the previous behaviour was not reachable on purpose.
+
 ### Changed
 
 - **शून्यम् has no sign.** `(०-७०) * ०` used to print `-०`, because Python's

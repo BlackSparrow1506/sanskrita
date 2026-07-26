@@ -1,6 +1,6 @@
 [package]
 name = "sanskrita"
-version = "0.5.0"
+version = "0.6.0"
 edition = "2021"
 description = "संस्कृता — the Sanskrit programming language, native Rust engine (वेगः)"
 license = "MIT"

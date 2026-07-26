@@ -1,4 +1,4 @@
-# ॐ संस्कृता (Sanskrita) v0.5 — फलम् (Phase 3 complete)
+# ॐ संस्कृता (Sanskrita) v0.6 — फलम् (Phase 3 complete)
 
 The Sanskrit programming language: Devanagari keywords, Pāṇinian kāraka
 arguments, exact decimal arithmetic, and a native Rust engine.
