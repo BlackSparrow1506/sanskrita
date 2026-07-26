@@ -29,6 +29,20 @@ PROGRAMS = [
     ('वद((२ + ३) * ४)।', "parens"),
     ('वद(१० % ३, (०-७) % ३, ७ % (०-३))।', "modulo incl. negatives"),
     ('वद(१० - ४, ६ * ७, १० / ५)।', "arithmetic"),
+    # भागः — every one of these was a real divergence between the two engines.
+    # They are kept here so CI compares them byte for byte on every push.
+    ('वद(३०६५०९४३४७६२५२६८२८०४४८७७३२३००४७६२४४१९३३३४६४७२६८०२६०२५०००० / २२५)।',
+     "exact division has no digit ceiling"),
+    ('वद(१ / ५१२, १ / ३९०६२५, ३ / ४०९६)।', "powers of two and five terminate"),
+    ('वद(१ / ३, १ / ७, २ / ३)।', "repeating quotients stop at 28 digits"),
+    ('वद(२४४.२० / २, १२२१.० / १०, ०.३० / ३)।', "trailing zeros down to the ideal exponent"),
+    ('वद(६.०० / ३, ७ / ०.५, १०० / ८)।', "a whole number is written as one"),
+    ('मानय ब = ५३७२२२९४५७३७७१५५३७३२३२४२३९३०२४३०४९४६६६६७००२७०८२९४६१७०८।\n'
+     'वद(ब / (ब + १))।', "inexact १.०००…० collapses to १"),
+    ('वद((०-७०) * ०, (०-१) * ०.००, ० / ९६८.००५)।', "शून्यम् has no sign"),
+    ('मानय स = ६७२४८७२४०५१५५८७३२७३२७०३६२०३३५५०८१३५९०८३५६९७८७४०४९.८१३३०००१।\n'
+     'वद((स / ५१२) * (४८३३२२३८५१८८४६१०५८८०९६६१ % (६४१.२५ + १)))।',
+     "no positive exponent leaks into a later product"),
     ('मानय क = ५। क = क + १। वद(क)।', "assignment"),
     ('ध्रुव प = ३। वद(प)।', "constant"),
     ('वद(५ > ३, ५ < ३, ५ >= ५, "अ" < "ब")।', "comparisons"),

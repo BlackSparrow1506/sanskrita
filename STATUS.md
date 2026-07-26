@@ -1,6 +1,6 @@
 # STATUS — what संस्कृता actually does, promise by promise
 
-*Last audited: 25 July 2026 · engine v0.5.0 "फलम्" · Phases 1–3*
+*Last audited: 26 July 2026 · engine v0.6.0 "शुद्धिः" · Phases 1–3*
 
 This file exists so nobody has to guess. Every commitment made in the design
 document for Phases 1–3 is listed below with an honest verdict: **shipped**,
@@ -169,6 +169,31 @@ defects that four layers of hand-written tests had missed:
 Both are locked in as conformance cases, differential cases, and Rust unit
 tests. This is what the layer is for, and it is worth running with a large
 `--count` before any release.
+
+A later run, at `--count 2000`, found four more — all in division, and two of
+them in the **reference** engine, which is the one everything else is checked
+against:
+
+3. **वेगः divided wrongly whenever the divisor was 10⁹ or larger.**
+   `BigInt::mul_mag` returned a magnitude with a leading zero limb, and
+   `cmp_mag` compares limb *count* before contents, so the binary search that
+   picks each quotient limb saturated at `BASE-1`. Divisors below 10⁹ take a
+   different code path, which is why every hand-written division test passed.
+   A fuzz of 30,000 multi-limb divisions went from 11,304 wrong to 0.
+4. **वेगः wrote correct quotients in the wrong form** — `२४४.२० / २` as `१२२.१`,
+   and an inexact `१.०००…०` left at 28 digits instead of collapsing to `१`.
+5. **The reference stopped being exact at 28 digits**, contradicting the rule
+   written in its own source since slice 5: `/` "is exact when it divides
+   evenly". `Decimal(a) / Decimal(b)` caps every division. वेगः was right here.
+6. **A positive exponent escaped the reference's division** and was inherited by
+   a later multiplication, silently changing how many decimal places the
+   *product* showed.
+
+The lesson recorded in `rust-engine/AUDIT.md` §31–33: when a computed value is
+wrong, test the primitives *underneath* it before rewriting the algorithm on top
+— `Decimal::div` was rewritten three times and was never the bug — and remember
+that a differential harness proves the two engines *agree*, never that either is
+*right*. The specification still has to be read against its own words.
 
 ## 7. Known, tracked divergences between the two engines
 

@@ -63,6 +63,28 @@ MICRO = [
     ('वद(१० / ४)।', '२.५'),
     ('वद(०.१ + ०.२)।', '०.३'),
     ('वद(०.१ + ०.२ == ०.३)।', 'सत्यम्'),
+    # भागः — how a quotient is written. These are the contract, not incidental
+    # formatting: each one was a real two-engine divergence.
+    # (1) exact division is EXACT, at any size — no 28-digit ceiling
+    ('वद(३०६५०९४३४७६२५२६८२८०४४८७७३२३००४७६२४४१९३३३४६४७२६८०२६०२५०००० / २२५)।',
+     '१३६२२६४१५४५००११९२३५७५५०१०३२४४६५६१०८५३०३७०९५४३४१३४४९००००'),
+    ('वद(१ / ५१२)।', '०.००१९५३१२५'),
+    ('वद(१ / ३९०६२५)।', '०.०००००२५६'),
+    # (2) only a repeating quotient is cut, to 28 significant digits
+    ('वद(१ / ३)।', '०.३३३३३३३३३३३३३३३३३३३३३३३३३३३३'),
+    ('वद(१ / ७)।', '०.१४२८५७१४२८५७१४२८५७१४२८५७१४२९'),
+    # (3) an exact quotient sheds trailing zeros only down to the ideal
+    #     exponent — the zero in १२२.१० is precision the operands claimed
+    ('वद(२४४.२० / २)।', '१२२.१०'),
+    ('वद(१२२१.० / १०)।', '१२२.१'),
+    ('वद(०.३० / ३)।', '०.१०'),
+    # (4) …but a whole number is written as one, exact division or not
+    ('वद(६.०० / ३)।', '२'),
+    ('वद(७ / ०.५)।', '१४'),
+    # (5) शून्यम् has no sign
+    ('वद((०-७०) * ०)।', '०'),
+    ('वद((०-१) * ०.००)।', '०.००'),
+    ('वद(० / ९६८.००५)।', '०'),
     ('वद(-५ + ३)।', '-२'),
     ('वद(2 + 3)।', '५'),                          # ASCII digits in, dev digits out
     # variables & types

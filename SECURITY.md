@@ -26,9 +26,9 @@ what we can promise, rather than a same-week patch guarantee.
 
 | Version | Supported |
 |---|---|
-| 0.4.x | ✅ current |
-| 0.3.x | security fixes only, until 0.5.0 |
-| < 0.3 | ❌ |
+| 0.6.x | ✅ current |
+| 0.5.x | security fixes only, until 0.7.0 |
+| < 0.5 | ❌ |
 
 Before v1.0 the language is explicitly unstable — see
 [docs/STABILITY.md](docs/STABILITY.md).
