@@ -307,6 +307,13 @@ impl Decimal {
         let mut qi = BigInt::from_digits(keep);
 
         // Round on what we dropped: > half up, < half down, exactly half to even.
+        //
+        // The "exactly half" arm is unreachable now that `exact_quotient` has
+        // already returned for every terminating quotient: a quotient that
+        // repeats leaves a non-zero remainder at every shift, so the dropped
+        // tail is never exactly ५०००…. It is kept because it costs nothing and
+        // it is what makes this function correct on its own terms, independent
+        // of what the caller above it happens to have filtered out.
         let first = rest.as_bytes()[0];
         let rest_nonzero = rest[1..].bytes().any(|c| c != b'0') || !r.is_zero();
         let round_up = first > b'5'
@@ -538,9 +545,17 @@ mod tests {
         // exact divisions keep their exact (short) form
         assert_eq!(q("1", "4"), "0.25");
         assert_eq!(q("10", "5"), "2");
-        // half-even at the boundary
-        assert_eq!(d("1").div(&d("8"), 1).unwrap().to_plain_string(), "0.1");
+        // `prec` applies ONLY to a quotient that repeats. १/८ terminates, so it
+        // comes back exact even when a single significant digit was asked for —
+        // this assertion used to expect ०.१ and was the last thing still
+        // written to the old "everything gets rounded" rule.
+        assert_eq!(d("1").div(&d("8"), 1).unwrap().to_plain_string(), "0.125");
         assert_eq!(d("1").div(&d("2"), 1).unwrap().to_plain_string(), "0.5");
+        // A repeating quotient is what `prec` actually cuts, rounding on the
+        // digits it drops.
+        assert_eq!(d("1").div(&d("3"), 1).unwrap().to_plain_string(), "0.3");
+        assert_eq!(d("2").div(&d("3"), 1).unwrap().to_plain_string(), "0.7");
+        assert_eq!(d("1").div(&d("3"), 2).unwrap().to_plain_string(), "0.33");
     }
 
     #[test]
