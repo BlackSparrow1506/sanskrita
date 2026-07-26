@@ -394,8 +394,11 @@ new-expression = "सृज" , postfix ;
 
 - Integer arithmetic is exact and unbounded.
 - `/` always produces a `दशमांशः`, so a result's *type* never depends on its
-  runtime values. Inexact division carries 28 significant digits, rounded
-  half-even.
+  runtime values. **Division is exact whenever it divides evenly — at any size,
+  with no digit ceiling.** `३०६५०९…४३ / २२५` returns all 55 of its digits, and
+  `१ / ५१२` returns `०.००१९५३१२५` in full. Only a quotient that would repeat
+  forever is cut, to 28 significant digits, rounded half-even — `१ / ३` is
+  `०.३३३३३३३३३३३३३३३३३३३३३३३३३३३३`.
 - `%` is **floored**, matching the reference: `(०-७) % ३` is `२`, not `-१`.
 - Mixing an integer and a `दशमांशः` promotes to `दशमांशः`.
 - A `द्रुतदशमांशः` on either side makes the whole operation binary-float — the
@@ -403,6 +406,27 @@ new-expression = "सृज" , postfix ;
 - `+` also concatenates two `वाक्यम्`s and joins two `सूची`s. Mixing text and a
   number is an error, not a coercion.
 - Division or modulo by zero is an error.
+
+#### How a quotient is written
+
+Two values can be equal and still say different things about precision, so the
+*form* of a quotient is specified, not incidental:
+
+- An **exact** division sheds trailing zeros only down to the ideal exponent —
+  `exp(dividend) − exp(divisor)`. So `२४४.२० / २` is `१२२.१०`, and `१२२१.० / १०`
+  is `१२२.१`. The retained zero is the precision the operands claimed, which is
+  what a money column depends on.
+- A **whole-number** result is written as a whole number, even when the division
+  was inexact. `६.०० / ३` is `२`, and `ब / (ब+१)` — which rounds to exactly
+  `१.०००…०` at 28 digits — is `१`.
+
+#### शून्यम् has no sign
+
+There is no negative zero. `(०-७०) * ०` is `०`, not `-०`. The scale is still
+kept, so `(०-१) * ०.००` is `०.००`.
+
+The one exception is `द्रुतदशमांशः`, which is IEEE-754 by name and by
+definition; `-०.०` is a real value there, and printed as such.
 
 ---
 

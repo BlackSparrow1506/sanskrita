@@ -1262,8 +1262,8 @@ def _make_ganitam():
         d = Decimal(x)
         with localcontext() as ctx:
             ctx.prec = max(_digits(d) + स्थानानि + 4, 28)
-            return d.quantize(Decimal(1).scaleb(-स्थानानि),
-                              rounding=ROUND_HALF_UP)
+            return _no_signed_zero(d.quantize(Decimal(1).scaleb(-स्थानानि),
+                                              rounding=ROUND_HALF_UP))
 
     for dev_name, obj in (
         ('वर्गमूलम्', math.sqrt),        # square root
@@ -2051,7 +2051,12 @@ class Interpreter:
             s = repr(v)
             return s if self.roman else to_dev_digits(s)
         if isinstance(v, (int, Decimal)):
-            s = format(v, "f") if isinstance(v, Decimal) else str(v)  # no E-notation
+            # _no_signed_zero again, at the last possible moment: वेगः cannot
+            # represent -० at all, so if one ever reaches here from a corner of
+            # the stdlib not yet covered, the two engines must still agree on
+            # what gets printed.
+            s = (format(_no_signed_zero(v), "f") if isinstance(v, Decimal)
+                 else str(v))                                  # no E-notation
             return s if self.roman else to_dev_digits(s)
         if isinstance(v, str):
             return f'"{v}"' if inner else v
@@ -2632,7 +2637,7 @@ class Interpreter:
                                      "सङ्ख्या() takes one text value")
             raw = to_ascii_digits(vals[0].strip())
             try:
-                return Decimal(raw) if "." in raw else int(raw)
+                return _no_signed_zero(Decimal(raw)) if "." in raw else int(raw)
             except Exception:
                 raise SanskritaError(line, f"'{vals[0]}' सङ्ख्या न",
                                      f"'{vals[0]}' is not a number")
@@ -2765,19 +2770,13 @@ class Interpreter:
         if not isinstance(a, (int, Decimal)) or not isinstance(b, (int, Decimal)):
             raise SanskritaError(line, "सङ्ख्ये अपेक्षिते", "expected numbers", "प्रकारदोषः")
         if op in ("+", "-", "*"):
-            return _exact(op, a, b)
+            return _no_signed_zero(_exact(op, a, b))
         if op in ("/", "%") and b == 0:
             raise SanskritaError(line, "शून्येन भागो न शक्यः", "division by zero", "गणितदोषः")
         if op == "%":
-            return _floor_mod(a, b)
+            return _no_signed_zero(_floor_mod(a, b))
         # op == "/" — exact when it divides evenly, else 28 significant digits
-        result = Decimal(a) / Decimal(b)
-        if result == result.to_integral_value():
-            try:
-                result = result.quantize(Decimal(1))
-            except Exception:
-                pass
-        return result
+        return _no_signed_zero(_div(a, b))
 
 # ------------------------------------------------- exact decimal arithmetic
 # Python's default decimal context rounds EVERY operation to 28 significant
@@ -2792,6 +2791,25 @@ class Interpreter:
 #   /         is exact when it divides evenly, otherwise 28 SIGNIFICANT digits,
 #             rounded half-even — the one place a limit is unavoidable, and it
 #             is the same limit in both engines.
+
+def _no_signed_zero(v):
+    """शून्यम् has no sign — ० and -० are one number, written one way.
+
+    Python's Decimal keeps IEEE-754's signed zero, so (०-७०) * ० is -०. That is
+    arithmetically defensible and, in a payroll column, indistinguishable from a
+    defect. वेगः has no signed zero at all (its BigInt uses sign 0 for zero), so
+    normalising here also removes a whole class of two-engine divergence rather
+    than growing one to match the other.
+
+    The scale is kept: -०.०० becomes ०.००, not ०. Only the sign goes.
+
+    द्रुतदशमांशः is deliberately untouched. It is IEEE-754 by definition and by
+    name, and -०.० is a real value there.
+    """
+    if isinstance(v, Decimal) and v == 0 and v.is_signed():
+        return v.copy_abs()
+    return v
+
 
 def _digits(v):
     return len(v.as_tuple().digits) + abs(v.as_tuple().exponent)
@@ -2824,6 +2842,82 @@ def _unscaled(v):
         n *= 10 ** exp
         exp = 0
     return n, exp
+
+
+def _terminating_quotient(a, b):
+    """(q, k) with a/b == q / 10**k exactly, or None when a/b repeats.
+
+    `a` and `b` are positive integers.
+
+    A quotient terminates exactly when, in lowest terms, its denominator has no
+    prime factor besides 2 and 5. Writing b = 2**i · 5**j · t with t coprime to
+    10, that is the same as saying **t divides a** — a power of ten can supply
+    twos and fives, but never a factor of t. Then k = max(i, j) is enough, and
+    no gcd is needed.
+    """
+    t = b
+    i = j = 0
+    while t % 2 == 0:
+        t //= 2
+        i += 1
+    while t % 5 == 0:
+        t //= 5
+        j += 1
+    if a % t:
+        return None
+    k = max(i, j)
+    q, r = divmod(a * 10 ** k, b)
+    if r:                      # unreachable if the reasoning above holds
+        return None
+    return q, k
+
+
+def _div(a, b):
+    """`/` — exact when it divides evenly, otherwise 28 significant digits.
+
+    That rule is the one stated at the top of this section, and this function
+    exists because `Decimal(a) / Decimal(b)` does NOT implement it: the context
+    caps every division at 28 significant digits, so a division that divides
+    evenly into 55 digits came back rounded, in flat contradiction of the
+    promise. वेगः already returned the exact value there, and वेगः was right.
+
+    The written form follows two further rules, both observable:
+
+      * an exact quotient sheds trailing zeros only down to the ideal exponent
+        exp(a) − exp(b), so २४४.२० / २ is १२२.१०, not १२२.१;
+      * a whole number is written as a whole number, exact or not.
+
+    Everything is returned with an exponent ≤ 0 (a scale), never a positive
+    one. Python's Decimal is happy to hold 1.23E+19 and then let a later
+    multiplication inherit that positive exponent, which silently changed how
+    many decimal places the *product* showed. वेगः has no such representation,
+    and `_unscaled` below already treats a positive exponent as something to be
+    materialised, so this keeps the two engines telling the same story.
+    """
+    ia, ea = _unscaled(a)
+    ib, eb = _unscaled(b)
+    ideal = ea - eb
+    if ia == 0:
+        return Decimal(0)
+    got = _terminating_quotient(abs(ia), abs(ib))
+    if got is not None:
+        c, k = got
+        x = ideal - k
+        while x < ideal and c % 10 == 0:
+            c //= 10
+            x += 1
+        if (ia < 0) != (ib < 0):
+            c = -c
+    else:
+        # inexact: 28 significant digits, half-even — and _unscaled() flattens
+        # any positive exponent the context produced.
+        c, x = _unscaled(Decimal(a) / Decimal(b))
+    if x < 0:                            # a whole number is written as one
+        p = 10 ** (-x)
+        if c % p == 0:
+            c //= p
+            x = 0
+    return Decimal(c * 10 ** x) if x >= 0 else Decimal(f"{c}E{x}")
 
 
 def _floor_mod(a, b):

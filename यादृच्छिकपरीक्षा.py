@@ -37,7 +37,27 @@ import sys
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-VEG = os.path.join(HERE, "rust-engine", "target", "release", "sanskrita-veg")
+ENGINE_DIR = os.path.join(HERE, "rust-engine")
+VEG = os.path.join(ENGINE_DIR, "target", "release", "sanskrita-veg")
+
+
+def build_veg():
+    """Rebuild वेगः before testing it.
+
+    This harness used to run whatever binary happened to be sitting in
+    target/release. `cargo test` only builds the DEBUG profile, so a source
+    change followed by `cargo test` left this file testing the previous engine
+    and reporting its old divergences — byte for byte, which reads exactly like
+    a fix that did not work. Silently testing a stale binary is worse than
+    failing loudly, so we build first, like तुल्यता.py already did.
+    """
+    print("वेगः निर्मीयते… (cargo build --release)", file=sys.stderr)
+    r = subprocess.run(["cargo", "build", "--release"],
+                       cwd=ENGINE_DIR, capture_output=True)
+    if r.returncode != 0:
+        print(r.stderr.decode(), file=sys.stderr)
+        return False
+    return os.path.exists(VEG)
 
 DEV = "०१२३४५६७८९"
 
@@ -291,9 +311,9 @@ def main():
                          "when spent, so CI can never hang")
     args = ap.parse_args()
 
-    use_veg = not args.only_reference and os.path.exists(VEG)
+    use_veg = not args.only_reference and build_veg()
     if not use_veg and not args.only_reference:
-        print("वेगः not built — checking the reference engine only.\n"
+        print("वेगः could not be built — checking the reference engine only.\n"
               "  cd rust-engine && cargo build --release\n", file=sys.stderr)
 
     base_seed = args.seed if args.seed is not None else random.randrange(1 << 30)

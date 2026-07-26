@@ -162,6 +162,15 @@ impl BigInt {
                 k += 1;
             }
         }
+        // The buffer is allocated at a.len()+b.len() limbs, but the product
+        // often needs one fewer. The leading zero MUST go: every magnitude in
+        // this module is required to be trimmed, because cmp_mag compares
+        // lengths before contents. An untrimmed value here made b*q look
+        // larger than it is, which drove divmod_mag's binary search to
+        // saturate at BASE-1 for every divisor of two limbs or more.
+        while let Some(&0) = out.last() {
+            out.pop();
+        }
         out.into_iter().map(|v| v as u32).collect()
     }
 
@@ -424,5 +433,84 @@ mod tests {
         assert_eq!(b("123").mul_pow10(3).to_string_signed(), "123000");
         assert_eq!(b("1").mul_pow10(20).to_string_signed(),
                    "100000000000000000000");
+    }
+
+    // Pin the primitives `Decimal::div` stands on. If one of these ever fails,
+    // the culprit is named here instead of only showing up as a wrong quotient.
+    #[test]
+    fn powers_of_ten_round_trip_through_digits() {
+        for k in 0..60usize {
+            let v = BigInt::from_i64(1).mul_pow10(k);
+            let mut want = String::from("1");
+            want.push_str(&"0".repeat(k));
+            assert_eq!(v.digits(), want, "10^{} rendered wrong", k);
+            assert_eq!(v.digits().len(), k + 1, "10^{} has wrong digit count", k);
+        }
+    }
+
+    #[test]
+    fn shifted_division_matches_by_hand() {
+        // the operands from the property-test failure, done exactly
+        let a = BigInt::from_digits("113").mul_pow10(50);
+        assert_eq!(a.digits().len(), 53);
+        let b = BigInt::from_digits("751306816453898389858997");
+        assert_eq!(b.digits().len(), 24);
+        let (q, _) = a.divmod_trunc(&b).unwrap();
+        assert_eq!(q.digits(), "15040459839476765103808918240");
+        assert_eq!(q.digits().len(), 29);
+    }
+
+    #[test]
+    fn digits_len_is_the_significant_digit_count() {
+        let v = BigInt::from_digits("1504045983947676510380891824");
+        assert_eq!(v.digits().len(), 28);
+        assert_eq!(BigInt::from_digits("1000000000").digits().len(), 10);
+        assert_eq!(BigInt::from_i64(0).digits(), "0");
+    }
+
+    // Every magnitude in this module must be trimmed, because cmp_mag compares
+    // lengths before contents. mul_mag allocates a.len()+b.len() limbs and the
+    // product usually needs one fewer, so it is the one place that can hand
+    // back an untrimmed value. It did, and it cost three wrong rewrites of
+    // Decimal::div before this test existed to say so.
+    #[test]
+    fn mul_mag_never_returns_a_leading_zero_limb() {
+        let cases: [(&str, &str); 5] = [
+            ("751306816453898389858997", "1"),
+            ("751306816453898389858997", "999999999"),
+            ("1000000000", "1000000000"),
+            ("999999999", "999999999"),
+            ("123456789012345678901234567890", "7"),
+        ];
+        for (x, y) in cases {
+            let p = BigInt::mul_mag(&BigInt::from_digits(x).mag, &BigInt::from_digits(y).mag);
+            assert_ne!(p.last(), Some(&0), "{} * {} left a zero limb on top", x, y);
+        }
+    }
+
+    // divmod_small handles one-limb divisors, so anything below 10^9 took a
+    // different path and always worked. Divisors of two limbs or more went
+    // through the binary search — the region that was broken and untested.
+    #[test]
+    fn division_is_exact_for_multi_limb_divisors() {
+        let cases: [(&str, &str, &str, &str); 6] = [
+            // (dividend, divisor, quotient, remainder)
+            ("11300000000000000000000000000000000000000000000000000",
+             "751306816453898389858997",
+             "15040459839476765103808918240", "419967613154735298594720"),
+            ("1000000000000000000", "1000000000", "1000000000", "0"),
+            ("1000000000000000000", "1000000001", "999999999", "1"),
+            ("123456789012345678901234567890", "98765432109876543210",
+             "1249999988", "60185185207253086410"),
+            ("340282366920938463463374607431768211456", "18446744073709551616",
+             "18446744073709551616", "0"),
+            ("999999999999999999999999999999", "999999999999",
+             "1000000000001000000", "999999"),
+        ];
+        for (n, d, wq, wr) in cases {
+            let (q, r) = BigInt::from_digits(n).divmod_trunc(&BigInt::from_digits(d)).unwrap();
+            assert_eq!(q.digits(), wq, "{} / {} quotient", n, d);
+            assert_eq!(r.digits(), wr, "{} / {} remainder", n, d);
+        }
     }
 }

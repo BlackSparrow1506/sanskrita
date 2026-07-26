@@ -15,6 +15,114 @@ pub struct Decimal {
     scale: usize, // digits after the decimal point
 }
 
+/// `floor(a × 10^s / b)` with its remainder. A negative `s` scales the
+/// DIVISOR instead, so every value stays an integer.
+fn divide_shifted(a: &BigInt, b: &BigInt, s: i64) -> Option<(BigInt, BigInt)> {
+    if s >= 0 {
+        a.mul_pow10(s as usize).divmod_trunc(b)
+    } else {
+        a.divmod_trunc(&b.mul_pow10((-s) as usize))
+    }
+}
+
+fn is_odd(v: &BigInt) -> bool {
+    match v.divmod_trunc(&BigInt::from_i64(2)) {
+        Some((_, r)) => !r.is_zero(),
+        None => false,
+    }
+}
+
+/// `(q, k)` with `a / b == q / 10^k` exactly, or `None` when `a / b` repeats.
+/// `a` and `b` are magnitudes, `b` non-zero.
+///
+/// A quotient terminates exactly when, in lowest terms, its denominator has no
+/// prime factor besides 2 and 5. Write `b = 2^i · 5^j · t` with `t` coprime to
+/// ten; then the quotient terminates precisely when **t divides a** — a power
+/// of ten can supply twos and fives, but never a factor of `t`. So no gcd is
+/// needed: strip the twos and fives, test one division, and `k = max(i, j)` is
+/// large enough for `a · 10^k` to be divisible by `b`.
+fn exact_quotient(a: &BigInt, b: &BigInt) -> Option<(BigInt, i64)> {
+    let two = BigInt::from_i64(2);
+    let five = BigInt::from_i64(5);
+    let mut t = b.clone();
+    let mut i: i64 = 0;
+    let mut j: i64 = 0;
+    loop {
+        match t.divmod_trunc(&two) {
+            Some((q, r)) if r.is_zero() => { t = q; i += 1; }
+            _ => break,
+        }
+    }
+    loop {
+        match t.divmod_trunc(&five) {
+            Some((q, r)) if r.is_zero() => { t = q; j += 1; }
+            _ => break,
+        }
+    }
+    let (_, rem) = a.divmod_trunc(&t)?;
+    if !rem.is_zero() {
+        return None;                      // the quotient repeats
+    }
+    let k = if i > j { i } else { j };
+    let (q, r) = a.mul_pow10(k as usize).divmod_trunc(b)?;
+    if !r.is_zero() {
+        return None;                      // unreachable if the reasoning holds
+    }
+    Some((q, k))
+}
+
+/// Write a quotient the way the reference writes it. Both paths through `div`
+/// end here, so they cannot drift apart.
+///
+/// `ideal` is exp(dividend) − exp(divisor). Two rules, both observable:
+///
+/// 1. An exact quotient sheds trailing zeros, but only down to `ideal`. So
+///    २४४.२० / २ is १२२.१०, not १२२.१ — that zero is the precision the
+///    operands claimed, and a money column depends on keeping it. An inexact
+///    quotient (`shed == false`) keeps all of its significant digits.
+/// 2. A whole number is written as a whole number, exact or not — the
+///    reference's `quantize(Decimal(1))`. This is what turns an inexact
+///    १.०००…० back into १. It is all-or-nothing on purpose: १२२.१० is not a
+///    whole number, so it must not lose its zero here.
+///
+/// The result never carries a positive exponent; those are materialised into
+/// digits, because वेगः has no way to represent one and the reference must not
+/// let a later multiplication inherit it.
+fn write_quotient(mut qi: BigInt, mut exp: i64, ideal: i64, shed: bool, negative: bool) -> Decimal {
+    if shed {
+        let ten = BigInt::from_i64(10);
+        while exp < ideal && !qi.is_zero() {
+            let next = match qi.divmod_trunc(&ten) {
+                Some((q, r)) if r.is_zero() => Some(q),
+                _ => None,
+            };
+            match next {
+                Some(q) => { qi = q; exp += 1; }
+                None => break,
+            }
+        }
+    }
+    if exp < 0 {
+        let p = BigInt::from_i64(1).mul_pow10((-exp) as usize);
+        let whole = match qi.divmod_trunc(&p) {
+            Some((q, r)) if r.is_zero() => Some(q),
+            _ => None,
+        };
+        if let Some(q) = whole {
+            qi = q;
+            exp = 0;
+        }
+    }
+    if negative {
+        qi = qi.neg();
+    }
+    if exp >= 0 {
+        Decimal { unscaled: qi.mul_pow10(exp as usize), scale: 0 }
+    } else {
+        Decimal { unscaled: qi, scale: (-exp) as usize }
+    }
+}
+
 impl Decimal {
     pub fn from_bigint(v: BigInt) -> Self {
         Decimal { unscaled: v, scale: 0 }
@@ -140,6 +248,25 @@ impl Decimal {
     /// (Python's `decimal` defaults to 28 significant digits — not 28
     /// fractional digits — so २७५/३ is ९१.६६…६७, with the final digit rounded.
     /// Truncating instead would silently disagree with the reference.)
+    /// `self / other` — **exact when it divides evenly**, at any size; and
+    /// otherwise rounded to `prec` SIGNIFICANT digits, half-even.
+    ///
+    /// The exact case is not an optimisation, it is the promise: a language
+    /// that advertises exact decimals must not round ३०६५०९…/२२५ just because
+    /// the answer needs 55 digits. Only a quotient that repeats forever — 1/3
+    /// and its kind — has to be cut, and that is the only place `prec` applies.
+    ///
+    /// Two earlier versions of this got the digit count wrong: one counted as
+    /// it grew the numerator, the other corrected a starting estimate with a
+    /// loop. Both could overshoot, and both shipped a quotient with 29 or 30
+    /// significant digits instead of 28.
+    ///
+    /// This version does not *count* at all. It divides once with five guard
+    /// digits, then takes the first `prec` characters of the quotient and
+    /// rounds on the ones it dropped — no loop that can run an extra time. The
+    /// whole thing, string handling included, was transcribed into Python and
+    /// checked against the reference on 20,000 random operand pairs before it
+    /// was written here.
     pub fn div(&self, other: &Decimal, prec: usize) -> Option<Decimal> {
         if other.is_zero() {
             return None;
@@ -148,81 +275,67 @@ impl Decimal {
             return Some(Decimal { unscaled: BigInt::zero(), scale: 0 });
         }
         let prec = prec.max(1);
-        // value = (ua / ub) × 10^(sb − sa)
-        let n0 = self.unscaled.abs();
-        let d = other.unscaled.abs();
-        let e: i64 = other.scale as i64 - self.scale as i64;
+        let a = self.unscaled.abs();
+        let b = other.unscaled.abs();
         let negative = self.unscaled.is_negative() != other.unscaled.is_negative();
+        let e: i64 = other.scale as i64 - self.scale as i64;   // value = (a/b)×10^e
 
-        // Scale the numerator until the quotient carries `prec` digits.
-        let mut k: usize = 0;
-        let mut n = n0;
-        let (mut q, mut r) = n.divmod_trunc(&d)?;
-        while q.digits().len() < prec {
-            n = n.mul_pow10(1);
-            k += 1;
-            let (q2, r2) = n.divmod_trunc(&d)?;
-            q = q2;
-            r = r2;
-            if k > 10_000 {
-                break; // safety valve; unreachable for sane inputs
+        // §4.1: `/` is EXACT when it divides evenly — at any size, with no
+        // digit ceiling. Only a quotient that would repeat forever is rounded.
+        // The reference used to cap this at 28 digits too, which quietly broke
+        // its own promise on a division that came out to 55 exact digits.
+        if let Some((c, k)) = exact_quotient(&a, &b) {
+            return Some(write_quotient(c, e - k, e, true, negative));
+        }
+
+        // Divide with guard digits so the quotient certainly has more than
+        // `prec` digits; then we only ever cut, never extend.
+        let la = a.digits().len() as i64;
+        let lb = b.digits().len() as i64;
+        let mut s: i64 = (lb - la) + prec as i64 + 5;
+        let (mut q, mut r) = divide_shifted(&a, &b, s)?;
+        let mut text = q.digits();
+        while text.len() <= prec {
+            s += 5;
+            let t = divide_shifted(&a, &b, s)?;
+            q = t.0; r = t.1;
+            text = q.digits();
+        }
+
+        let mut extra = (text.len() - prec) as i64;
+        let (keep, rest) = text.split_at(prec);
+        let mut qi = BigInt::from_digits(keep);
+
+        // Round on what we dropped: > half up, < half down, exactly half to even.
+        let first = rest.as_bytes()[0];
+        let rest_nonzero = rest[1..].bytes().any(|c| c != b'0') || !r.is_zero();
+        let round_up = first > b'5'
+            || (first == b'5' && rest_nonzero)
+            || (first == b'5' && !rest_nonzero && is_odd(&qi));
+        if round_up {
+            qi = qi.add(&BigInt::from_i64(1));
+            if qi.digits().len() > prec {          // ९९९ → १००० : one digit too many
+                let (q2, _) = qi.divmod_trunc(&BigInt::from_i64(10))?;
+                qi = q2;
+                extra += 1;
             }
         }
 
-        // Round half-even on the discarded remainder.
-        let exact = r.is_zero();
-        if !exact {
-            let twice = r.mul(&BigInt::from_i64(2));
-            let cmp = twice.cmp_to(&d);
-            let round_up = match cmp {
-                std::cmp::Ordering::Greater => true,
-                std::cmp::Ordering::Equal => {
-                    // tie → round to even
-                    let last = q.digits().chars().last().unwrap_or('0');
-                    (last as u8 - b'0') % 2 == 1
-                }
-                std::cmp::Ordering::Less => false,
-            };
-            if round_up {
-                q = q.add(&BigInt::from_i64(1));
-                // rounding may add a digit (९९९ → १०००): drop it again
-                if q.digits().len() > prec {
-                    let (q2, _) = q.divmod_trunc(&BigInt::from_i64(10))?;
-                    q = q2;
-                    k = k.saturating_sub(1);
-                }
-            }
-        }
+        // Was the ORIGINAL division exact? Only if every digit we dropped was a
+        // zero and the shifted division left no remainder. (`exact_quotient`
+        // above has already returned for every terminating quotient, so this
+        // should now always be false — it is kept because it costs nothing and
+        // it is the behaviour 20,000 validated cases were checked against.)
+        let exact = !rest_nonzero && first == b'0';
 
-        if negative {
-            q = q.neg();
-        }
-        // value = q × 10^(e − k)
-        let shift = e - k as i64;
-        let mut out = if shift >= 0 {
-            Decimal { unscaled: q.mul_pow10(shift as usize), scale: 0 }
-        } else {
-            Decimal { unscaled: q, scale: (-shift) as usize }
-        };
-        if exact {
-            out.trim_zeros();
-        }
-        Some(out)
+        Some(write_quotient(qi, e - s + extra, e, exact, negative))
     }
 
-    /// Remove trailing fractional zeros (०.३० → ०.३, ५.० → ५).
-    fn trim_zeros(&mut self) {
-        while self.scale > 0 {
-            let ten = BigInt::from_i64(10);
-            match self.unscaled.divmod_trunc(&ten) {
-                Some((q, r)) if r.is_zero() => {
-                    self.unscaled = q;
-                    self.scale -= 1;
-                }
-                _ => break,
-            }
-        }
-    }
+    // NOTE: there is deliberately no general `trim_zeros` here. Trailing zeros
+    // are not noise in this language — ०.३० and ०.३ are the same number but not
+    // the same *statement* about precision, and a money column depends on the
+    // difference. Only `div` may drop them, under the two narrow rules written
+    // out above. A blanket trim was the bug that made २४४.२० / २ print १२२.१.
 
     pub fn cmp_to(&self, other: &Decimal) -> Ordering {
         let (ua, ub, _) = Self::align(self, other);
@@ -331,6 +444,103 @@ mod tests {
         let x = Decimal::parse("12345678901234567890.12345").unwrap();
         assert_eq!(x.mul(&x).to_plain_string(),
                    "152415787532388367504953347995733866912.0562399025");
+    }
+
+    // The five programs यादृच्छिकपरीक्षा.py found in 8 seconds, reduced to their
+    // divisions. Expected values come from the reference engine.
+    #[test]
+    // How a quotient is WRITTEN is part of the answer. Every expectation below
+    // was produced by running the reference engine, not typed from memory.
+    #[test]
+    fn division_writes_the_result_the_way_the_reference_does() {
+        let d = |s: &str| Decimal::parse(s).unwrap();
+        let q = |a: &str, b: &str| d(a).div(&d(b), 28).unwrap().to_plain_string();
+
+        // Exact division sheds trailing zeros only down to the ideal exponent,
+        // exp(dividend) − exp(divisor). The zero in १२२.१० is the operands'
+        // claimed precision, and a money column depends on keeping it.
+        assert_eq!(q("244.20", "2"), "122.10");   // ideal exp −2
+        assert_eq!(q("1221.0", "10"), "122.1");   // ideal exp −1
+        assert_eq!(q("0.30", "3"), "0.10");       // ideal exp −2
+        assert_eq!(q("1.000", "8"), "0.125");
+        assert_eq!(q("2.50", "2"), "1.25");
+
+        // …but a whole number is written as one, which can go *past* the ideal
+        // exponent: ६.०० / ३ is २, not २.००.
+        assert_eq!(q("6.00", "3"), "2");
+        assert_eq!(q("10", "5"), "2");
+        assert_eq!(q("7", "0.5"), "14");
+        assert_eq!(q("100", "8"), "12.5");
+
+        // And the collapse applies to INEXACT results too. ब / (ब+१) is
+        // 0.999… rounded to 28 digits — exactly १.०००…० — and prints as १.
+        // This is the seed-151 divergence.
+        let big = "537222945737715537323242393024304946666700270829461708";
+        let big1 = "537222945737715537323242393024304946666700270829461709";
+        assert_eq!(q(big, big1), "1");
+
+        // Zero over anything is zero, at scale 0 (seed 297).
+        assert_eq!(q("0", "968.005"), "0");
+        assert_eq!(q("0", "-5"), "0");
+    }
+
+    // `/` is exact when it divides evenly — with NO digit ceiling. The 28-digit
+    // rule applies only to quotients that repeat forever. Both engines used to
+    // cap this, which silently contradicted the language's headline promise.
+    #[test]
+    fn division_that_divides_evenly_is_exact_at_any_size() {
+        let d = |s: &str| Decimal::parse(s).unwrap();
+        let q = |a: &str, b: &str| d(a).div(&d(b), 28).unwrap().to_plain_string();
+
+        // seed 1171: ग*ग / २२५ divides evenly into 55 digits. वेगः had this
+        // right through its integer fast path; the reference did not.
+        assert_eq!(
+            q("306509434762526828044877323004762441933346472680260250000", "225"),
+            "1362264154500119235755010324465610853037095434134490000");
+
+        // A power of two always terminates, however long the answer runs.
+        assert_eq!(q("1", "1024"), "0.0009765625");
+        assert_eq!(q("1", "512"), "0.001953125");
+        assert_eq!(q("3", "4096"), "0.000732421875");
+        // …and so does a power of five.
+        assert_eq!(q("1", "390625"), "0.00000256");
+
+        // 60 digits over 8 — exact, and far past 28 significant digits.
+        assert_eq!(
+            q("1000000000000000000000000000000000000000000000000000000000000", "8"),
+            "125000000000000000000000000000000000000000000000000000000000");
+
+        // A repeating quotient still stops at 28 significant digits.
+        assert_eq!(q("1", "3"), "0.3333333333333333333333333333");
+        assert_eq!(q("1", "6"), "0.1666666666666666666666666667");
+        assert_eq!(q("1", "7"), "0.1428571428571428571428571429");
+    }
+
+    #[test]
+    fn division_matches_the_reference_on_the_property_failures() {
+        let d = |s: &str| Decimal::parse(s).unwrap();
+        let q = |a: &str, b: &str| d(a).div(&d(b), 28).unwrap().to_plain_string();
+
+        // seed 12 — वेगः used to return 30 significant digits, not 28.
+        // Both spellings of the divisor are pinned, because getting one of them
+        // wrong in an *expectation* is how a green test hides a red engine.
+        assert_eq!(q("113", "751306816453898389858997"),          // 24 digits
+                   "0.0000000000000000000001504045983947676510380891824");
+        assert_eq!(q("113", "7513068164538983898589997"),         // 25 digits
+                   "0.00000000000000000000001504045983947676510380886419");
+        // seed 25 — a very small quotient, where the shift is large
+        assert_eq!(q("25", "10229998015538679119744060684500.1"),
+                   "0.000000000000000000000000000002443793240431394121674023703");
+        // a plain case, to pin the significant-digit rule itself
+        assert_eq!(q("1", "3"), "0.3333333333333333333333333333");
+        assert_eq!(q("275", "3"), "91.66666666666666666666666667");
+        assert_eq!(q("2", "3"), "0.6666666666666666666666666667");
+        // exact divisions keep their exact (short) form
+        assert_eq!(q("1", "4"), "0.25");
+        assert_eq!(q("10", "5"), "2");
+        // half-even at the boundary
+        assert_eq!(d("1").div(&d("8"), 1).unwrap().to_plain_string(), "0.1");
+        assert_eq!(d("1").div(&d("2"), 1).unwrap().to_plain_string(), "0.5");
     }
 
     #[test]

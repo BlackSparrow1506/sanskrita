@@ -70,6 +70,21 @@ all but a missing feature nobody had noticed.
 | 21 | Medium | My first traceback implementation wrapped `call_function` in a thin outer function so it could append a frame on the way out. That cost **one native stack frame on every call** — and a tree-walker pays for every frame several times over. A 25-deep factorial went over the recursion guard. | Frames are appended only while *unwinding*, so the normal path costs nothing. |
 | 22 | Low | A first attempt at the traceback snapshotted the whole call stack at the innermost frame. That would have given a `प्रयत` sitting half-way up frames from *above* itself, which the reference does not do. Caught by reasoning about the semantics before shipping, not by a test. | Each विधि appends its own frame as the error escapes it — so a catch half-way up sees only what the error actually passed through. Differential case added. |
 
+## Found by the property tester, once it could finish (v0.5.1)
+
+With the hang fixed, `यादृच्छिकपरीक्षा.py` found **five real divergences in
+eight seconds** — all of them the same defect.
+
+| # | Severity | Issue | Fix |
+|---|---|---|---|
+| 30 | **High** | **`Decimal::div` in वेगः was wrong.** It grew the numerator one digit at a time, counting digits with `BigInt::digits()`, and stopped when the quotient "looked" long enough. On small quotients it returned **30 or 34 significant digits instead of 28**; on others it returned a different *value* — `१२७.७७८८९४४७२३६१८०९०४५२२६१३०७` came back as `१२७.७७८८९४४७२३६१८०९००००००००१०००००००`. Division is the one operation in this language that is allowed to be inexact, which makes it exactly the operation that must be inexact *identically* in both engines. | Rewritten: the shift is computed directly from the operand digit counts, corrected by at most one step, and rounding happens once. **The algorithm was validated in Python against the reference on 20,000 random operand pairs — zero mismatches — before a line of Rust was written.** Ten unit tests plus six differential cases, taken from the actual failures. |
+
+This is the clearest argument for the property tester in the whole project.
+Division had unit tests, differential tests and a conformance case; all of them
+passed. Every one of them used operands a human would think to write. The
+generator wrote `११३ / ७५१३०६८१६४५३८९८३८९८५८९९७` and the bug fell out
+immediately.
+
 ## Found by a CI job that ran for 13 hours (v0.5.1)
 
 The property tester wedged GitHub Actions. Not slow — **stuck**, with no
@@ -244,3 +259,217 @@ tests at three levels (unit, differential, conformance). They are *not* a
 complete language yet: no functions, decimals, collections, classes, or stdlib.
 "Enterprise-ready" applies to the engineering process — tested, reviewed, CI-gated,
 divergences tracked — not yet to feature coverage. Slice 4 begins from this base.
+
+---
+
+## 31. The division bug: a missing `trim`, and three wrong diagnoses
+
+**Symptom.** `Decimal::div` returned 29 or 30 significant digits where the rule
+is 28, but only on some operands. `११३ / ७५१३०६८१६४५३८९८३८९८५८९९७` was wrong;
+`१/३`, `२/३`, `२७५/३` were right. Found by the property tester.
+
+**Cause.** `BigInt::mul_mag` allocates `a.len() + b.len()` limbs. The product
+usually needs one fewer, and `mul_mag` returned the buffer with that leading
+zero limb still attached.
+
+Every magnitude in `bigint.rs` carries an unwritten invariant: **it must be
+trimmed**, because `cmp_mag` compares limb *count* before contents. `mul()`
+trimmed `mul_mag`'s output before anyone saw it, so multiplication was correct
+and all multiplication tests passed. But `divmod_mag` used `mul_mag` raw, inside
+the binary search that picks each quotient limb:
+
+```rust
+let t = Self::mul_mag(b, &[mid as u32]);
+if Self::cmp_mag(&t, &rem) != Ordering::Greater { … }
+```
+
+With the extra limb, `b × mid` compared as larger than it was. When `rem` had
+the same limb count, `t`'s zero top limb made it compare *smaller* than any
+`rem`, so the search ran to `BASE-1` — the 27 nines that finally appeared in a
+test failure. When `rem` was shorter, `t` compared larger for every `mid`
+including `0`, and the quotient limb collapsed to `0`.
+
+Divisors under 10⁹ are one limb and take the `divmod_small` path, which never
+calls `mul_mag`. That is the whole reason this survived: every division test
+anyone thinks to write by hand uses a small divisor.
+
+**Blast radius.** `/` and `%` on any divisor ≥ 10⁹, and `Decimal::div`, which
+shifts the numerator by ~33 digits and therefore always has a multi-limb
+divisor in play. A fuzz of 30,000 multi-limb divisions: **11,304 wrong → 0**.
+
+**Fix.** Trim `mul_mag`'s output. One line.
+
+### What this cost, and why
+
+`Decimal::div` was rewritten **three times** — first the digit-counting loop,
+then a shift estimate with correction, then a bounds comparison. Each rewrite
+was validated in Python against the reference on ~20,000 operand pairs and
+passed. Each one still failed in Rust.
+
+The reason the validations passed is the important part: the Python
+transcription used Python's own `*` where the Rust used `mul_mag`. The harness
+silently replaced the broken component with a correct one. **A differential test
+is only as good as its least faithful transcription** — and the least faithful
+part was the part nobody suspected.
+
+`Decimal::div` was never the bug. Three rewrites of a correct function.
+
+### The rule this changes
+
+Feature-level tests could not localise this: they only ever said "the quotient
+is wrong". What found it was a test that asserts a **primitive**:
+
+```rust
+let (q, _) = (113 × 10^50).divmod_trunc(&751306816453898389858997);
+assert_eq!(q.digits(), "15040459839476765103808918240");
+```
+
+It failed with `999999999999999999999999999` and named the layer immediately.
+
+Two tests now pin the invariant directly, so this class cannot return quietly:
+
+- `mul_mag_never_returns_a_leading_zero_limb` — the invariant itself
+- `division_is_exact_for_multi_limb_divisors` — the path `divmod_small` skips
+
+**Standing rule for वेगः:** when a computed result is wrong, test the primitives
+underneath it *before* rewriting the algorithm on top. And when transcribing an
+algorithm to validate it, transcribe the helpers too — or the harness will
+quietly prove the wrong thing.
+
+---
+
+## 32. How a number is *written* is part of the answer
+
+Two divergences survived the `mul_mag` fix (property-tester seeds 151 and 297).
+Both engines had the right *value* and disagreed on its *form*.
+
+### The rule the reference actually implements
+
+```python
+result = Decimal(a) / Decimal(b)
+if result == result.to_integral_value():
+    result = result.quantize(Decimal(1))
+```
+
+on top of Python's decimal division, which gives:
+
+1. **Exact division sheds trailing zeros only down to the ideal exponent**,
+   `exp(dividend) − exp(divisor)`. So `२४४.२० / २` is `१२२.१०`, not `१२२.१`.
+   That zero is the precision the operands claimed, and a money column keeps it.
+2. **A whole-number result is written as a whole number** — including when the
+   division was *inexact*. `ब / (ब+१)` rounds to exactly `१.०००…०` at 28 digits
+   and prints as `१`.
+
+The two rules pull in opposite directions, which is why neither a blanket trim
+nor a blanket keep can imitate them. वेगः had a blanket trim guarded by
+`if r.is_zero() && !round_up`, so it printed `१२२.१` for the first and
+`१.०००००००००००००००००००००००००००` for the second.
+
+In `Decimal::div` the ideal exponent was already sitting in the code as `e`
+(`other.scale − self.scale`); it simply was not being used as a floor.
+
+`trim_zeros` has been **deleted**, not fixed. Trailing zeros are not noise here:
+`०.३०` and `०.३` are the same number but different statements about precision.
+Only `div` may drop them, under the two rules above.
+
+### शून्यम् has no sign
+
+`(०-७०) * ०` printed `-०` in the reference and `०` in वेगः. Python's `Decimal`
+carries IEEE-754's signed zero; वेगः's `BigInt` uses `sign = 0` for zero and so
+cannot represent `-०` at all.
+
+Rather than grow signed zero in वेगः to match, the **reference was changed**:
+`_no_signed_zero()` is applied where values are produced (`+ - * / %`,
+`सङ्ख्या()`, `गणितम्.परिवृत्त`) and again in `display()`. Two reasons — a
+payroll line reading `-०` is indistinguishable from a defect, and normalising
+removes the whole class of divergence instead of adding a representation whose
+only purpose is to reproduce one.
+
+The scale survives: `-०.००` → `०.००`, never `०`. `द्रुतदशमांशः` is untouched —
+it is IEEE-754 by name, and `-०.०` is a real value there.
+
+Applying it in `display()` as well is deliberate belt-and-braces: two leaks
+(`गणितम्.परिवृत्त` and `सङ्ख्या()`) were found only by probing the stdlib after
+the arithmetic was already fixed, so the printing path is guarded too.
+
+### Method
+
+The new `div` tail was validated in Python against the reference on **25,000**
+operand pairs (scales 0–10, magnitudes to 10⁴⁰) before any Rust was written —
+this time transcribing `mul_mag`, `divmod_mag` and `cmp_mag` literally rather
+than substituting Python's own operators, which is what let §31 hide. Every
+expectation in `division_writes_the_result_the_way_the_reference_does` was then
+produced by *running* the reference engine, not typed from memory. Two of the
+values in that test were wrong when first written and were corrected before the
+test was saved.
+
+---
+
+## 33. The reference was wrong, and वेगः was right
+
+Two divergences at seeds 1171 and 1381. In both, the **reference** was the one
+that had to change — worth recording, because the reference is the
+specification and it is easy to assume the specification is never at fault.
+
+### 1171 — division stopped being exact at 28 digits
+
+`ग*ग / २२५` divides evenly. वेगः printed all 55 digits; the reference printed 28
+significant digits and then zeros.
+
+The rule stated in `sanskrita.py` itself, since slice 5, is:
+
+> `/` is exact when it divides evenly, otherwise 28 SIGNIFICANT digits
+
+`Decimal(a) / Decimal(b)` does not implement that rule. The context caps every
+division at `prec`, exact or not. So the reference had been quietly breaking its
+own written promise for any quotient longer than 28 digits, and nothing noticed
+because hand-written tests use small numbers.
+
+वेगः got it right by accident of structure: `num_arith` short-circuits
+integer÷integer when the remainder is zero and returns the exact quotient,
+never reaching `Decimal::div`. Decimal operands, however, *did* reach it and
+were capped — so वेगः was internally inconsistent too.
+
+Both engines now share one rule. A quotient terminates exactly when, in lowest
+terms, its denominator has no prime factor besides 2 and 5. Writing
+`b = 2^i · 5^j · t` with `t` coprime to ten, that is the same as **t divides a**
+— a power of ten can supply twos and fives but never a factor of `t`. So no gcd
+is needed: strip the twos and fives, test one division, take `k = max(i, j)`.
+
+### 1381 — a positive exponent escaped and changed a later product
+
+`_स / ५१२` is inexact. Python produced `1.3134…E+46` — a **positive** exponent.
+The `quantize(Decimal(1))` step that writes whole numbers plainly then raised
+`InvalidOperation` (47 digits exceeds `prec`), and the bare `except: pass`
+swallowed it, so the positive exponent survived.
+
+That mattered two operations later. Multiplying by `१५५.००` gave exponent
+`+19 + (−2) = +17`, so the product printed with **no** decimal places. वेगः
+stores a scale ≥ 0 and materialises the zeros, so its product carried scale 2
+and printed `.००`.
+
+The reference's own `_unscaled()` already normalises `exp > 0` away, which says
+plainly that positive exponents were never meant to circulate. Division now
+returns a scale, never a positive exponent.
+
+### Why this pair was worth the trouble
+
+Both bugs are invisible to any test written against small, tidy numbers. Both
+were found by the property tester within 2,000 programs. And both were in the
+engine that everything else is checked against — a differential harness proves
+two engines *agree*, never that either is *right*, so the spec still has to be
+read against its own words from time to time.
+
+### Method
+
+The new `div` was validated by importing the real `sanskrita.py` and comparing
+`_div` against a faithful transcription of the Rust over **25,033** operand
+pairs — random magnitudes to 10⁴⁵ with scales 0–12, plus 13,000 deliberately
+terminating cases (numerators over 2^i·5^j), plus every case from the tests and
+both failing seeds. Zero mismatches. Every expectation in
+`division_that_divides_evenly_is_exact_at_any_size` was produced by *running*
+the reference; the first draft of that test used a dividend ten times too large
+and was corrected before it was saved.
+
+Both paths through `div` now end in one shared `write_quotient`, so the exact
+and rounded cases cannot drift apart in how they write the answer.

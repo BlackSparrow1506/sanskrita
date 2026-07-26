@@ -11,8 +11,84 @@ them is listed under **Breaking** below.
 
 ## [Unreleased]
 
+### Changed
+
+- **शून्यम् has no sign.** `(०-७०) * ०` used to print `-०`, because Python's
+  `Decimal` carries IEEE-754's signed zero. वेगः has no signed zero at all, so
+  the two engines disagreed — and in a payroll column `-०` reads as a defect
+  rather than as arithmetic. The reference now normalises the sign away
+  wherever a value is produced (`+ - * / %`, `सङ्ख्या()`, `गणितम्.परिवृत्त`) and
+  once more at the moment of printing, so nothing in a corner of the stdlib can
+  reintroduce it. **The scale survives: `-०.००` becomes `०.००`, not `०`.**
+
+  `द्रुतदशमांशः` is deliberately untouched. It is IEEE-754 by name and by
+  definition, and `-०.०` is a real value there.
+
 ### Fixed
 
+- **Division stopped being exact at 28 digits, contradicting its own rule.** The
+  reference's stated rule — written in a comment above the arithmetic since
+  slice 5 — is that `/` "is exact when it divides evenly, otherwise 28
+  significant digits". `Decimal(a) / Decimal(b)` does not implement that: the
+  context caps *every* division, so `ग*ग / २२५`, which divides evenly into 55
+  digits, came back rounded. वेगः returned the exact value through its integer
+  fast path and was right; the reference has been fixed to match, and वेगः's
+  `Decimal::div` gained the same exact path so that decimal operands behave
+  like integer ones. A quotient now terminates exactly when its denominator, in
+  lowest terms, has no prime factor but 2 and 5 — tested without a gcd by
+  stripping the twos and fives and checking what is left divides the numerator.
+  (Found by the property tester, seed 1171.)
+
+- **A positive exponent could leak out of division and change a later product.**
+  `_स / ५१२` produced `1.3134…E+46`; the `quantize(Decimal(1))` meant to write
+  whole numbers plainly raised `InvalidOperation` (47 digits > 28) and was
+  swallowed by a bare `except`, leaving the positive exponent in place.
+  Multiplying by `१५५.००` then inherited it, so the product printed with **no**
+  decimal places while वेगः — which has no positive exponents at all — printed
+  two. Division now always returns a scale, never a positive exponent, which is
+  what the reference's own `_unscaled()` already assumed. (Seed 1381.)
+
+- **यादृच्छिकपरीक्षा.py tested whatever binary happened to be lying around.** It
+  pointed at a prebuilt `target/release/sanskrita-veg` and never built it, while
+  `तुल्यता.py` had always run `cargo build --release` first. Since `cargo test`
+  builds only the *debug* profile, editing the engine and then running
+  `cargo test` + the property tester silently checked the **previous** engine and
+  reported its old divergences byte for byte — which reads exactly like a fix
+  that did not work. It now builds before it tests. A harness that quietly tests
+  a stale binary is worse than one that fails loudly.
+
+- **वेगः wrote correct quotients in the wrong form.** Two rules govern how a
+  quotient is *written*, and वेगः had neither. An exact division sheds trailing
+  zeros only down to the ideal exponent `exp(dividend) − exp(divisor)`, so
+  `२४४.२० / २` is `१२२.१०` — वेगः trimmed unconditionally and printed `१२२.१`,
+  losing precision the operands had claimed. And a whole-number result is
+  written as a whole number even when the division was inexact, so `ब / (ब+१)`
+  is `१` — वेगः printed `१.०००००००००००००००००००००००००००`. Both found by the
+  property tester (seeds 151 and 297). The blanket `trim_zeros` helper has been
+  removed rather than fixed: trailing zeros are not noise in this language, and
+  only `div` may touch them, under these two narrow rules.
+
+- **वेगः divided incorrectly whenever the divisor was 10⁹ or larger.** The cause
+  was one missing line in `BigInt::mul_mag`: it allocated `a.len()+b.len()`
+  limbs, and when the product needed one fewer it returned the buffer with a
+  leading zero limb still on it. `mul()` trimmed the result afterwards, so
+  multiplication was correct and every multiplication test passed. But
+  `divmod_mag` fed `mul_mag`'s output straight to `cmp_mag`, which compares
+  **limb count before contents** — so `b × q` looked one limb too big, and the
+  binary search that picks each quotient limb either saturated at `BASE-1` or
+  collapsed to `0`. Divisors below 10⁹ take the separate `divmod_small` path,
+  which is why `१/३`, `२/३` and every hand-written division test were always
+  right, and why this survived so long.
+
+  Consequences, all now fixed by the one-line trim: `/` on large divisors, `%`
+  on large divisors, and `Decimal::div`. A fuzz of 30,000 multi-limb divisions
+  went from **11,304 wrong to 0**.
+
+  Recorded plainly because it is the more useful lesson: `Decimal::div` was
+  rewritten three times chasing this, and `Decimal::div` was never the bug. The
+  tests that finally located it were the ones that check a *primitive* rather
+  than the feature — added only after the third failed rewrite. See
+  `rust-engine/AUDIT.md` §31.
 - **The property tester could hang CI, and did — for 13 hours.** Its generator
   could emit `स = स + (स * स)` inside a loop, squaring the accumulator every
   iteration until the number had ~98,000 digits. Both engines computed it

@@ -131,6 +131,16 @@ PROGRAMS = [
     ('वद((०-७.५) % ३, ७.५ % (०-३), १०.२५ % ०.५, (०-०.००१) % ०.३)।',
      "decimal modulo is floored, not truncated"),
     ('वद(९९९९९९९९९९९९९९९९९९९९९९९९९९९९.९ - ०.८)।', "no 28-digit rounding"),
+    # --- division to 28 SIGNIFICANT digits — five property-test failures ---
+    ('वद(११३ / ७५१३०६८१६४५३८९८३८९८५८९९७)।', "tiny quotient, huge divisor"),
+    ('वद(२५ / १०२२९९९८०१५५३८६७९११९७४४०६०६८४५००.१)।', "tiny quotient, decimal divisor"),
+    ('वद(१ / ३, २ / ३, २७५ / ३)।', "repeating quotients round half-even"),
+    ('वद((१६६ / ८९०) - ८८)।', "quotient then subtraction"),
+    ('मानय य = ९२४१३५६३७११४०१२०४५७६८८३३। '
+     'वद((य % (५१९३९२९८५५६२६८७५५०१९४१२० + १)) / (२९८.२५ + १))।',
+     "bignum modulo feeding a division"),
+    ('वद(१२७ + (७७८८९४४७२३६१८०९० / १०००००००००००००००))।',
+     "division inside an addition keeps its digits"),
     # --- Tier 2 standard library ---
     ('आनय "कालः" इति का। वद(का.वर्षः("२०२६-०७-२५"), का.मासः("२०२६-०७-२५"), '
      'का.दिनम्("२०२६-०७-२५"), का.वासरः("२०२६-०७-२५"))।', "कालः date parts"),
