@@ -8,6 +8,7 @@ defines the language. **वेगः** (`rust-engine/`) is the native engine —
 fast binary with no runtime. Both must produce byte-identical output for every
 program; `तुल्यता.py` is what enforces that, on every push.
 
+🙋 **[contributions/](contributions/)** - new here, or only have a phone? Start here, no terminal needed.
 📋 **[STATUS.md](STATUS.md)** — every design promise for Phases 1–3, with an
 honest verdict: shipped, partial, or deferred (and to which phase).
 📐 **[docs/GRAMMAR.md](docs/GRAMMAR.md)** — the complete formal grammar ·
