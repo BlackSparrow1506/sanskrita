@@ -2,6 +2,8 @@
 
 धन्यवादः for your interest! संस्कृता welcomes contributors — programmers, Sanskrit scholars, teachers, and students alike.
 
+**New to GitHub, or only have a phone? Start in [`contributions/`](contributions/)** - pick your folder, no terminal needed.
+
 ## Ground rules (from our blueprint)
 
 1. **One language, one spec.** Roman aliases are input convenience; canonical source is Devanagari. Never fork the syntax. (We studied how Perl died.)
